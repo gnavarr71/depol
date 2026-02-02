@@ -1,0 +1,19 @@
+.image_full{
+   display:block;
+	margin: auto;
+  }
+
+ .image_mobile{
+  display:none;
+	 margin: auto;
+ }
+
+@media (max-width: 1464px) and (min-width: 600px){
+  .image_full{
+   display:none;
+  }
+
+  .image_mobile{
+   display:block;
+  }
+}
