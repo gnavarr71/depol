@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Interactive Hand-Controlled Particle System</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        #webcam { position: absolute; bottom: 10px; right: 10px; width: 160px; height: 120px; z-index: 2; border-radius: 8px; transform: scaleX(-1); opacity: 0.7; pointer-events: none;}
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; z-index: 10; font-size: 1.2rem; text-align: center; pointer-events: none;}
+    </style>
+</head>
+<body>
+
+    <div id="loading">Initialize Camera & AI...<br>Please allow camera access.</div>
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="canvas-container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/+esm"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+
+        // --- Configuration ---
+        const IMAGE_URL = 'image_0.jpg'; 
+        const PARTICLE_SIZE = 2.0;
+        const THRESHOLD_OPEN = 0.08; // Hand open threshold
+        const THRESHOLD_CLOSED = 0.02; // Hand closed threshold
+
+        // --- Globals ---
+        let scene, camera, renderer, particlesMesh;
+        let originalPositions = [];
+        let randomPositions = [];
+        let colors = [];
+        let handLandmarker = undefined;
+        let webcamElement = document.getElementById('webcam');
+        let currentExplosionFactor = 0; // 0 = image formed, 1 = exploded
+        let targetExplosionFactor = 0;
+
+        // --- 1. Initialization ---
+        async function init() {
+            // Setup Three.js Scene
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 200;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Optimize for mobile
+            container.appendChild(renderer.domElement);
+
+            // Load Image & Create Particles
+            await createParticlesFromImage(IMAGE_URL);
+
+            // Initialize Hand Tracking
+            await initHandTracking();
+
+            // Start Animation Loop
+            animate();
+            
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        // --- 2. Image Processing & Particle Generation ---
+        function createParticlesFromImage(url) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = url;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Scale down image to manage particle count (max width 200px for performance)
+                    const aspectRatio = img.height / img.width;
+                    const width = 200;
+                    const height = width * aspectRatio;
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    const imgData = ctx.getImageData(0, 0, width, height);
+                    const data = imgData.data;
+
+                    const posArray = [];
+                    const colArray = [];
+                    const rndArray = [];
+
+                    // Loop through pixels
+                    for (let y = 0; y < height; y++) {
+                        for (let x = 0; x < width; x++) {
+                            const i = (y * width + x) * 4;
+                            const r = data[i] / 255;
+                            const g = data[i + 1] / 255;
+                            const b = data[i + 2] / 255;
+                            const alpha = data[i + 3];
+
+                            if (alpha > 128) { // Only render visible pixels
+                                // Center the image
+                                const pX = x - width / 2;
+                                const pY = -(y - height / 2); // Flip Y
+                                const pZ = 0;
+
+                                // Original Position
+                                originalPositions.push(pX, pY, pZ);
+                                
+                                // Color
+                                colArray.push(r, g, b);
+
+                                // Random Explosion Position
+                                const rX = (Math.random() - 0.5) * 500;
+                                const rY = (Math.random() - 0.5) * 500;
+                                const rZ = (Math.random() - 0.5) * 500; // Explode towards/away camera
+                                randomPositions.push(rX, rY, rZ);
+                                
+                                // Initial buffer pos
+                                posArray.push(pX, pY, pZ);
+                            }
+                        }
+                    }
+
+                    // Create Geometry
+                    const geometry = new THREE.BufferGeometry();
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(posArray, 3));
+                    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colArray, 3));
+                    
+                    // Material
+                    const material = new THREE.PointsMaterial({
+                        size: PARTICLE_SIZE,
+                        vertexColors: true,
+                        sizeAttenuation: true,
+                        transparent: true,
+                        opacity: 0.9
+                    });
+
+                    particlesMesh = new THREE.Points(geometry, material);
+                    scene.add(particlesMesh);
+                    resolve();
+                };
+                img.onerror = (e) => {
+                    console.error("Failed to load image. Ensure filename matches.", e);
+                    document.getElementById('loading').innerText = "Error loading image.";
+                }
+            });
+        }
+
+        // --- 3. MediaPipe Hand Tracking Setup ---
+        async function initHandTracking() {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
+            );
+            
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO",
+                numHands: 2
+            });
+
+            // Start Webcam
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: "user",
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    } 
+                });
+                webcamElement.srcObject = stream;
+                await new Promise((resolve) => {
+                    webcamElement.onloadedmetadata = () => {
+                        webcamElement.play();
+                        resolve();
+                    };
+                });
+            }
+        }
+
+        // --- 4. Logic & Calculations ---
+
+        // Calculate hand tension based on distance between Thumb Tip (4) and Index Tip (8)
+        function calculateHandTension(landmarks) {
+            // Landmarks: 4 = Thumb Tip, 8 = Index Tip, 0 = Wrist
+            // We normalize against wrist distance to account for camera depth
+            
+            const thumb = landmarks[4];
+            const index = landmarks[8];
+            const wrist = landmarks[0];
+
+            // Distance thumb to index
+            const pinchDist = Math.sqrt(
+                Math.pow(thumb.x - index.x, 2) + 
+                Math.pow(thumb.y - index.y, 2)
+            );
+
+            // Normalization factor (Wrist to Index Base (5)) roughly sizes the hand
+            const indexBase = landmarks[5];
+            const handSize = Math.sqrt(
+                Math.pow(wrist.x - indexBase.x, 2) + 
+                Math.pow(wrist.y - indexBase.y, 2)
+            );
+
+            const normalizedPinch = pinchDist / handSize;
+
+            // Map: 0.2 (Open) -> 0.0 (Closed)
+            // We want: Open = Image Formed (Factor 0), Closed = Exploded (Factor 1)
+            
+            let tension = 0;
+            if(normalizedPinch < 0.3) {
+                 // Hand is closing
+                 tension = 1 - (normalizedPinch / 0.3); 
+            }
+            return Math.min(Math.max(tension, 0), 1);
+        }
+
+        let lastVideoTime = -1;
+
+        // --- 5. Main Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Detect Hands
+            if (handLandmarker && webcamElement.currentTime !== lastVideoTime) {
+                lastVideoTime = webcamElement.currentTime;
+                const results = handLandmarker.detectForVideo(webcamElement, Date.now());
+
+                if (results.landmarks && results.landmarks.length > 0) {
+                    let totalTension = 0;
+                    
+                    // Average tension of all detected hands
+                    for (const landmarks of results.landmarks) {
+                        totalTension += calculateHandTension(landmarks);
+                    }
+                    totalTension = totalTension / results.landmarks.length;
+                    
+                    // If tension is high (fist), explode (Factor -> 1)
+                    // If tension is low (open), form image (Factor -> 0)
+                    targetExplosionFactor = totalTension; 
+                } else {
+                    // No hands? Slowly return to formed image
+                    targetExplosionFactor = 0;
+                }
+            }
+
+            // 2. Smooth Interpolation (Lerp) for fluid movement
+            currentExplosionFactor += (targetExplosionFactor - currentExplosionFactor) * 0.1;
+
+            // 3. Update Particles
+            if (particlesMesh) {
+                const positions = particlesMesh.geometry.attributes.position.array;
+                
+                // Slight rotation for 3D feel
+                particlesMesh.rotation.y += 0.002;
+                particlesMesh.rotation.x = Math.sin(Date.now() * 0.001) * 0.1;
+
+                // Update vertex positions based on factor
+                for (let i = 0; i < positions.length; i += 3) {
+                    const ox = originalPositions[i];
+                    const oy = originalPositions[i + 1];
+                    const oz = originalPositions[i + 2];
+
+                    const rx = randomPositions[i];
+                    const ry = randomPositions[i + 1];
+                    const rz = randomPositions[i + 2];
+
+                    // Lerp between Original (Image) and Random (Explosion)
+                    positions[i] = ox + (rx - ox) * currentExplosionFactor;     // X
+                    positions[i+1] = oy + (ry - oy) * currentExplosionFactor; // Y
+                    positions[i+2] = oz + (rz - oz) * currentExplosionFactor; // Z
+                }
+
+                particlesMesh.geometry.attributes.position.needsUpdate = true;
+                
+                // Optional: Scale particle size based on tension
+                particlesMesh.material.size = PARTICLE_SIZE + (currentExplosionFactor * 3);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>
