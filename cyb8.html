@@ -1,0 +1,387 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hand‑Controlled 3D Logo Particles — Three.js + MediaPipe</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+
+  <!-- Three.js (r165 or newer) -->
+  <script src="https://unpkg.com/three@0.165.0/build/three.min.js" crossorigin="anonymousion bundle (Hand Landmarker) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-visione.js</script>
+
+  <style>
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: #4b0a86; /* purple background */
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      color: #ffd400; /* yellow */
+    }
+    #app { position: fixed; inset: 0; }
+    #hud {
+      position: fixed; left: 12px; bottom: 12px; z-index: 10; pointer-events: none;
+      font-size: 12px; line-height: 1.35; opacity: .85;
+      background: rgba(0,0,0,.15); padding: 8px 10px; border-radius: 8px;
+      backdrop-filter: blur(3px);
+    }
+    #hud b { color: #fff; }
+    /* Keep video hidden but alive (required for inference) */
+    video {
+      position: fixed; width: 1px; height: 1px; left: -9999px; top: -9999px;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+  <div id="hud">
+    <div>🤝 <b>Two‑hand control</b> — Open palm = explode, Fist = condense, Move = direct flow</div>
+    <div>📷 If the camera prompt doesn’t appear, ensure you’re on <b>HTTPS</b>.</div>
+    <div id="status">Loading models…</div>
+  </div>
+
+  <!-- Hidden camera feed -->
+  <video id="camera" autoplay playsinline muted></video>
+
+<script>
+/* =========================
+   1) EMBEDDED LOGO (Base64)
+   ========================= */
+const LOGO_DATA_URL = "data:image/png;base64,{{BASE64_LOGO}}"
+  .replace("{{BASE64_LOGO}}", `{{B64}}`);
+/* The {{B64}} token is replaced below. */
+
+/* =========================
+   2) THREE.JS SCENE SETUP
+   ========================= */
+let scene, camera, renderer, points, geometry, material;
+let WIDTH = window.innerWidth, HEIGHT = window.innerHeight;
+
+const BG_COLOR = 0x4b0a86;        // purple background
+const PARTICLE_COLOR = 0xffd400;  // yellow
+const CAMERA_Z = 160;             // camera distance
+
+// Particle buffers
+let positions, velocities, targets, origins;
+let particleCount = 0;
+
+// Physics parameters
+const springK = 0.08;      // attraction to target (logo / expanded logo)
+const damping = 0.92;      // velocity damping
+const explodeKBase = 0.0;  // baseline outward push (raised by openness)
+const handAttractK = 0.18; // pull toward each palm center
+const handFlowK   = 0.55;  // add flow based on hand movement vector
+let explodeK = explodeKBase;
+
+let hands = [];            // [{ palmWorld: THREE.Vector3, openness:0..1, flow:THREE.Vector3 }, ...]
+let lastPalmWorlds = [];   // track movement to compute flow
+let lastFrameTime = performance.now();
+
+initThree();
+window.addEventListener('resize', onResize);
+
+/* =========================
+   3) BUILD PARTICLES FROM LOGO
+   ========================= */
+function buildParticlesFromLogo(img) {
+  // Draw into an offscreen canvas, sample opaque/dark pixels to create particle positions
+  const targetW = 640; // sampling canvas width
+  const aspect = img.width / img.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = Math.round(targetW / aspect);
+  const ctx = canvas.getContext('2d');
+  // High contrast: draw white background then multiply
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const step = 3; // sample every N pixels (density)
+  const pts = [];
+  for (let y = 0; y < canvas.height; y += step) {
+    for (let x = 0; x < canvas.width; x += step) {
+      const i = (y * canvas.width + x) * 4;
+      const r = imgData[i], g = imgData[i+1], b = imgData[i+2], a = imgData[i+3];
+      // Threshold: include dark pixels (logo is black) and opaque areas
+      const lum = (0.2126*r + 0.7152*g + 0.0722*b);
+      if (a > 64 && lum < 200) {
+        pts.push({x, y});
+      }
+    }
+  }
+
+  particleCount = pts.length;
+
+  positions  = new Float32Array(particleCount * 3);
+  velocities = new Float32Array(particleCount * 3);
+  targets    = new Float32Array(particleCount * 3);
+  origins    = new Float32Array(particleCount * 3);
+
+  // Map pixels → world space (centered), keep Z near 0 with a small jitter for 3D perception
+  const scale = 0.22; // world units per pixel
+  const centerX = canvas.width / 2, centerY = canvas.height / 2;
+  for (let i = 0; i < particleCount; i++) {
+    const px = (pts[i].x - centerX) * scale;
+    const py = (centerY - pts[i].y) * scale; // invert Y
+    const pz = (Math.random() - 0.5) * 2.0;
+
+    // start positions (randomly scattered)
+    positions[i*3+0] = (Math.random() - 0.5) * 200;
+    positions[i*3+1] = (Math.random() - 0.5) * 200;
+    positions[i*3+2] = (Math.random() - 0.5) * 40;
+
+    // target = logo shape
+    targets[i*3+0] = px;
+    targets[i*3+1] = py;
+    targets[i*3+2] = pz;
+
+    // origin (logo baseline), used to scale outward/inward with gestures
+    origins[i*3+0] = px;
+    origins[i*3+1] = py;
+    origins[i*3+2] = pz;
+  }
+
+  geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  material = new THREE.PointsMaterial({
+    color: PARTICLE_COLOR,
+    size: 1.8,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 1.0,
+    depthWrite: false
+  });
+
+  points = new THREE.Points(geometry, material);
+  scene.add(points);
+}
+
+/* =========================
+   4) CAMERA → HAND LANDMARKER
+   ========================= */
+const videoEl = document.getElementById('camera');
+const statusEl = document.getElementById('status');
+
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width: { ideal: 1280 }, height: { ideal: 720 },
+        frameRate: { ideal: 30, max: 60 }
+      },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    statusEl.textContent = 'Camera started. Initializing hand tracking…';
+  } catch (err) {
+    statusEl.textContent = 'Camera error: ' + err;
+    console.error(err);
+  }
+}
+
+// MediaPipe Hand Landmarker (LIVE_STREAM)
+let handLandmarker;
+
+async function initHandLandmarker() {
+  const vision = await window.FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+  );
+  handLandmarker = await window.HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+    },
+    numHands: 2,
+    runningMode: "LIVE_STREAM",
+    minHandDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+    minHandPresenceConfidence: 0.5
+  });
+  statusEl.textContent = 'Hand tracking ready. Show both hands.';
+}
+
+// Run detection every animation frame
+function detectLoop(ts) {
+  if (handLandmarker && videoEl.readyState >= 2) {
+    const res = handLandmarker.detectForVideo(videoEl, ts);
+    processHands(res);
+  }
+  requestAnimationFrame(detectLoop);
+}
+
+/* =========================
+   5) GESTURE LOGIC (open vs fist + tension + flow)
+   ========================= */
+function processHands(res) {
+  hands.length = 0; // reset
+  const videoW = videoEl.videoWidth || WIDTH;
+  const videoH = videoEl.videoHeight || HEIGHT;
+
+  if (res && res.landmarks) {
+    for (let h = 0; h < res.landmarks.length; h++) {
+      const lm = res.landmarks[h]; // array of 21 points with x,y (0..1) & z
+      // Palm center: average of wrist + MCPs
+      const idxPalm = [0,5,9,13,17];
+      let cx = 0, cy = 0;
+      for (const idx of idxPalm) { cx += lm[idx].x; cy += lm[idx].y; }
+      cx /= idxPalm.length; cy /= idxPalm.length;
+
+      // Convert image coords → world coords (z=0 plane)
+      const palmWorld = imageToWorld(cx * videoW, cy * videoH, 0);
+
+      // Openness (0..1) based on finger curl (index,middle,ring,pinky). Thumb optional.
+      const openness = fingerOpenness(lm);
+
+      // Hand movement → flow
+      let flow = new THREE.Vector3(0,0,0);
+      if (lastPalmWorlds[h]) {
+        flow.copy(palmWorld).sub(lastPalmWorlds[h]);
+      }
+      lastPalmWorlds[h] = palmWorld.clone();
+
+      hands.push({ palmWorld, openness, flow });
+    }
+  }
+
+  // Aggregate control from both hands
+  let avgOpen = 0;
+  for (const hand of hands) avgOpen += hand.openness;
+  if (hands.length > 0) avgOpen /= hands.length;
+
+  // Map openness to explosion factor (instant response)
+  explodeK = avgOpen * 1.25;                 // 0..~1.25 outward push
+}
+
+function fingerOpenness(lm) {
+  // Use cos(angle) between MCP->PIP and PIP->TIP — straight ~ +1, curled ~ -1
+  const sets = [
+    [5,6,8],   // index
+    [9,10,12], // middle
+    [13,14,16],// ring
+    [17,18,20] // pinky
+  ];
+  let sum = 0, n = 0;
+  for (const [mcp, pip, tip] of sets) {
+    const ax = lm[pip].x - lm[mcp].x, ay = lm[pip].y - lm[mcp].y;
+    const bx = lm[tip].x - lm[pip].x, by = lm[tip].y - lm[pip].y;
+    const dot = ax*bx + ay*by;
+    const na = Math.hypot(ax, ay), nb = Math.hypot(bx, by);
+    const cos = (na>1e-6 && nb>1e-6) ? dot/(na*nb) : -1;
+    const ext = Math.max(0, Math.min(1, (cos + 1) * 0.5)); // 0..1
+    sum += ext; n++;
+  }
+  return n ? sum/n : 0;
+}
+
+/* =========================
+   6) PARTICLE PHYSICS UPDATE
+   ========================= */
+function updatePhysics(dt) {
+  if (!points) return;
+
+  // Targets: baseline logo expanded/contracted by explodeK outward from origin
+  for (let i = 0; i < particleCount; i++) {
+    const ox = origins[i*3+0], oy = origins[i*3+1], oz = origins[i*3+2];
+    // Outward direction from center (normalize)
+    const r = Math.max(1e-4, Math.hypot(ox, oy));
+    const dirx = ox / r, diry = oy / r;
+    // Explode factor — push targets outward (instant)
+    const tx = ox + dirx * explodeK * 18.0;
+    const ty = oy + diry * explodeK * 18.0;
+    const tz = oz + (Math.random() - 0.5) * 0.3; // subtle depth shimmer
+
+    targets[i*3+0] = tx;
+    targets[i*3+1] = ty;
+    targets[i*3+2] = tz;
+  }
+
+  // For each hand, also add attractive and flow forces
+  const attractors = hands.map(h => h.palmWorld);
+  const flows      = hands.map(h => h.flow);
+
+  for (let i = 0; i < particleCount; i++) {
+    const px = positions[i*3+0], py = positions[i*3+1], pz = positions[i*3+2];
+    const tx = targets[i*3+0],   ty = targets[i*3+1],   tz = targets[i*3+2];
+
+    // Spring toward target (logo/exploded)
+    let vx = velocities[i*3+0], vy = velocities[i*3+1], vz = velocities[i*3+2];
+    vx += (tx - px) * springK;
+    vy += (ty - py) * springK;
+    vz += (tz - pz) * springK;
+
+    // Hand attraction & flow
+    for (let h = 0; h < attractors.length; h++) {
+      const ax = attractors[h].x, ay = attractors[h].y; // z ~ 0 plane
+      const dx = ax - px, dy = ay - py;
+      const invD = 1 / Math.max(12, Math.hypot(dx, dy)); // soften near hands
+      vx += dx * handAttractK * invD;
+      vy += dy * handAttractK * invD;
+
+      // Flow (movement vector)
+      vx += flows[h].x * handFlowK;
+      vy += flows[h].y * handFlowK;
+    }
+
+    // Damping and integrate
+    vx *= damping; vy *= damping; vz *= damping;
+    positions[i*3+0] = px + vx * dt;
+    positions[i*3+1] = py + vy * dt;
+    positions[i*3+2] = pz + vz * dt;
+    velocities[i*3+0] = vx; velocities[i*3+1] = vy; velocities[i*3+2] = vz;
+  }
+
+  geometry.attributes.position.needsUpdate = true;
+}
+
+/* =========================
+   7) RENDER LOOP
+   ========================= */
+function animate() {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+  lastFrameTime = now;
+
+  updatePhysics(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+/* =========================
+   8) HELPERS
+   ========================= */
+function initThree() {
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(45, WIDTH / HEIGHT, 0.1, 2000);
+  camera.position.set(0, 0, CAMERA_Z);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+  renderer.setSize(WIDTH, HEIGHT);
+  renderer.setClearColor(BG_COLOR, 1);
+  document.getElementById('app').appendChild(renderer.domElement);
+
+  // Load logo → build particles
+  const img = new Image();
+  img.onload = () => buildParticlesFromLogo(img);
+  img.src = LOGO_DATA_URL;
+
+  animate();
+}
+
+function onResize() {
+  WIDTH = window.innerWidth; HEIGHT = window.innerHeight;
+  camera.aspect = WIDTH / HEIGHT; camera.updateProjectionMatrix();
+  renderer.setSize(WIDTH, HEIGHT);
+}
+
+// Convert image (pixel) coordinates to world space (intersection with z=0 plane)
+function imageToWorld(x, y, zPlane = 0) {
+  const ndcX =  (x / (videoEl.videoWidth  || WIDTH)) * 2 - 1;
+  const ndcY = -(y / (videoEl.videoHeight || HEIGHT)) * 2 + 1;
+  const ndc = new THREE.Vector3(ndcX, ndcY, 0.5); // near plane-ish
+  ndc.unproject(camera);
+  const dir = ndc.sub(camera.position).normalize();
+  const t = (zPlane - camera.position.z) / dir.z;

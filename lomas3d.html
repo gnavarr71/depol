@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerveceria Lomos Particle System (Hand Controlled)</title>
+    
+    <link rel="stylesheet" href="style.css"> 
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675466861/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466861/camera_utils.js" crossorigin="anonymous"></script>
+    
+    <style>
+        /* Optional: Add a style block for simple CSS if you don't use a separate file */
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            opacity: 0; /* Hide the video element */
+        }
+    </style>
+</head>
+<body>
+    <video id="video-overlay" playsinline></video>
+    
+    <script>
+        // --- Global Variables ---
+        let scene, camera, renderer, particles;
+        const PARTICLE_COUNT = 15000; // Increased for better resolution
+        
+        // Hand Interaction State
+        const HAND_POSITIONS = [new THREE.Vector3(100, 100, 100), new THREE.Vector3(100, 100, 100)]; // Up to two hands
+        const HAND_GESTURES = [false, false]; // true if fist/closed
+        
+        // Particle Data Arrays
+        let positions = new Float32Array(PARTICLE_COUNT * 3);
+        let originalPositions = new Float32Array(PARTICLE_COUNT * 3);
+        let velocities = new Float32Array(PARTICLE_COUNT * 3);
+
+        // --- Core Initialization ---
+        function init() {
+            // 1. Scene and Camera
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x551A8B); // Purple Background
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            // 2. Renderer (crucial for performance)
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // 3. Load Texture (Your Logo)
+            const textureLoader = new THREE.TextureLoader();
+            textureLoader.load(
+                'lomas bn.png',
+                (texture) => {
+                    createParticles(texture);
+                    animate();
+                    // Start hand tracking after particles are ready
+                    setupHandTracking(); 
+                },
+                undefined,
+                (error) => {
+                    console.error('Error loading logo texture. Make sure "lomas bn.png" is in the same directory.', error);
+                }
+            );
+
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // --- Step 3: Creating the Logo Particle System ---
+        function createParticles(logoTexture) {
+            // A. Sample the logo image for particle starting positions
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            
+            const aspectRatio = logoTexture.image.width / logoTexture.image.height;
+            const canvasWidth = 512;
+            const canvasHeight = Math.round(canvasWidth / aspectRatio);
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            context.drawImage(logoTexture.image, 0, 0, canvasWidth, canvasHeight);
+            
+            const imageData = context.getImageData(0, 0, canvasWidth, canvasHeight);
+            const pixelData = imageData.data;
+            
+            let logoPoints = [];
+            for (let i = 0; i < pixelData.length; i += 4) {
+                // Check for dark/black pixels (R, G, B < 50)
+                if (pixelData[i] < 50 && pixelData[i + 1] < 50 && pixelData[i + 2] < 50) {
+                    const x = (i / 4) % canvasWidth;
+                    const y = Math.floor((i / 4) / canvasWidth);
+                    logoPoints.push({ x, y });
+                }
+            }
+
+            // B. Assign positions
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                // Ensure we don't sample more points than available
+                const logoPoint = logoPoints[i % logoPoints.length];
+                
+                // Map pixel coordinates to Three.js coordinates
+                const scale = 5.0; // Size of the logo in 3D space
+                const x = (logoPoint.x / canvasWidth - 0.5) * scale * aspectRatio;
+                const y = -(logoPoint.y / canvasHeight - 0.5) * scale;
+                const z = 0;
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+                originalPositions[i * 3] = x;
+                originalPositions[i * 3 + 1] = y;
+                originalPositions[i * 3 + 2] = z;
+                
+                velocities[i * 3] = 0;
+                velocities[i * 3 + 1] = 0;
+                velocities[i * 3 + 2] = 0;
+            }
+
+            // C. Create the particle geometry and material
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+
+            const material = new THREE.PointsMaterial({
+                color: 0xFFFF00, // Yellow
+                size: 0.04,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending,
+                sizeAttenuation: true
+            });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+
+        // --- Step 4: Particle Update Logic (Animation Loop) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const currentPositions = particles.geometry.attributes.position.array;
+            const interactionRadius = 1.5;
+            const attractionStrength = 0.005;
+            const repulsionStrength = 0.015;
+            const springConstant = 0.005;
+            const damping = 0.95;
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const i3 = i * 3;
+                
+                const pos = new THREE.Vector3(currentPositions[i3], currentPositions[i3 + 1], currentPositions[i3 + 2]);
+                const originalPos = new THREE.Vector3(originalPositions[i3], originalPositions[i3 + 1], originalPositions[i3 + 2]);
+
+                let forceVector = new THREE.Vector3(0, 0, 0);
+
+                // A. Hand Interactions (Up to 2 hands)
+                for (let h = 0; h < 2; h++) {
+                    const center = HAND_POSITIONS[h];
+                    const distanceToHand = pos.distanceTo(center);
+
+                    if (distanceToHand < interactionRadius) {
+                        // Linear influence falloff
+                        const influence = 1 - (distanceToHand / interactionRadius);
+                        const interactionVector = pos.clone().sub(center).normalize().multiplyScalar(influence);
+                        
+                        if (HAND_GESTURES[h]) {
+                            // Fist: Contract/Condense (Attraction toward hand)
+                            forceVector.sub(interactionVector.multiplyScalar(attractionStrength));
+                        } else {
+                            // Open Hand: Expand/Explode (Repulsion away from hand)
+                            forceVector.add(interactionVector.multiplyScalar(repulsionStrength));
+                        }
+                    }
+                }
+                
+                // B. Return to Original Logo Position (Spring Force)
+                const springForce = originalPos.clone().sub(pos).multiplyScalar(springConstant);
+                forceVector.add(springForce);
+                
+                // C. Apply Forces to Velocity
+                velocities[i3] += forceVector.x;
+                velocities[i3 + 1] += forceVector.y;
+                velocities[i3 + 2] += forceVector.z;
+                
+                // D. Apply Damping (Friction)
+                velocities[i3] *= damping;
+                velocities[i3 + 1] *= damping;
+                velocities[i3 + 2] *= damping;
+
+                // E. Update Position
+                currentPositions[i3] += velocities[i3];
+                currentPositions[i3 + 1] += velocities[i3 + 1];
+                currentPositions[i3 + 2] += velocities[i3 + 2];
+            }
+            
+            particles.geometry.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+
+        // --- Step 5: Hand Tracking Integration (MediaPipe) ---
+        function setupHandTracking() {
+            const videoElement = document.getElementById('video-overlay');
+
+            // 1. Setup MediaPipe Hands
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675466861/${file}`,
+            });
+
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1, // 0 for faster performance on mobile/Android
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onResults);
+
+            // 2. Setup Camera
+            const cameraUtils = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+            cameraUtils.start();
+
+            // 3. Process Hand Results
+            function onResults(results) {
+                // Reset hand positions to keep them out of interaction range if not detected
+                HAND_POSITIONS[0].set(100, 100, 100);
+                HAND_POSITIONS[1].set(100, 100, 100);
+                HAND_GESTURES[0] = false;
+                HAND_GESTURES[1] = false;
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    results.multiHandLandmarks.forEach((handLandmarks, index) => {
+                        if (index < 2) { // Process up to 2 hands
+                            // a. Calculate Hand Center (e.g., center of palm, landmark 9)
+                            const centerLandmark = handLandmarks[9]; // Middle finger MCP
+
+                            // Map normalized (0 to 1) MediaPipe coordinates to Three.js coordinates
+                            // The scene is set up for X: -2.5 to 2.5, Y: -2.5 to 2.5 
+                            // X is usually flipped for webcam view: 1.0 -> Left, 0.0 -> Right
+                            HAND_POSITIONS[index].x = (centerLandmark.x - 0.5) * -5.0; 
+                            HAND_POSITIONS[index].y = (centerLandmark.y - 0.5) * -5.0; 
+                            HAND_POSITIONS[index].z = (centerLandmark.z) * -10.0 + 1; // Z for depth perception
+
+                            // b. Detect Gesture (Fist/Open Hand)
+                            // Measure distance between index finger tip (8) and thumb tip (4)
+                            const indexTip = handLandmarks[8];
+                            const thumbTip = handLandmarks[4];
+                            
+                            const dist = Math.sqrt(
+                                Math.pow(indexTip.x - thumbTip.x, 2) + 
+                                Math.pow(indexTip.y - thumbTip.y, 2)
+                            );
+                            
+                            // A low distance means the hand is likely closed (Fist/Pinch)
+                            const FIST_THRESHOLD = 0.08; 
+                            HAND_GESTURES[index] = dist < FIST_THRESHOLD;
+                        }
+                    });
+                }
+            }
+        }
+
+        // Kick off the whole process
+        init();
+
+    </script>
+</body>
+</html>
