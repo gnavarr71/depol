@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tectake Hand Particle System</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: sans-serif;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        /* Hide the video element used for tracking */
+        .input_video {
+            display: none;
+        }
+        /* Ensure UI stays on top */
+        .tp-dfwv {
+            z-index: 100;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweakpane@3.1.0/dist/tweakpane.min.js"></script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <video class="input_video"></video>
+
+    <script>
+        // ================= Config & State =================
+        const config = {
+            particleCount: 12000, // Increased count for better detail
+            particleSize: 0.15,
+            baseColor: '#00ff88',
+            expansionStrength: 10.0, // Controls how far particles spread when hands open
+            logoFile: 'tectakehome.png' // The uploaded image file name
+        };
+
+        let scene, camera, renderer, particles, particleMaterial;
+        
+        // Store the target positions derived from the logo image
+        let targetPositions = new Float32Array(config.particleCount * 3);
+        // Store current positions being rendered
+        let currentPositions = new Float32Array(config.particleCount * 3);
+        
+        // Global hand state
+        let handOpenness = { left: 0, right: 0 };
+        let smoothedOpenness = 0; // Averaged and smoothed value for rendering
+
+        // ================= Three.js Setup =================
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 25; // Move camera back to view the logo better
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Particle Geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(currentPositions, 3));
+
+            // Particle Material
+            particleMaterial = new THREE.PointsMaterial({
+                color: config.baseColor,
+                size: config.particleSize,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+
+            particles = new THREE.Points(geometry, particleMaterial);
+            scene.add(particles);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ================= Shape Generation: Image Processing =================
+
+        // Reads the logo image, finds dark pixels, and converts them to 3D particle coordinates
+        function loadTectakeImage(url) {
+            const img = new Image();
+            img.src = url;
+            img.crossOrigin = 'anonymous'; // Necessary if loading from another domain, good practice
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                // Scale down the image for faster processing and appropriate world size
+                const scaleDown = 0.2; 
+                canvas.width = img.width * scaleDown;
+                canvas.height = img.height * scaleDown;
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imgData.data;
+                let validPoints = [];
+                const pixelToWorldScale = 0.25; // Scales the logo to a reasonable size in the 3D scene
+
+                for(let y = 0; y < canvas.height; y++) {
+                    for(let x = 0; x < canvas.width; x++) {
+                        const index = (y * canvas.width + x) * 4;
+                        const r = data[index];
+                        const g = data[index+1];
+                        const b = data[index+2];
+                        const a = data[index+3];
+
+                        // Check for dark, non-transparent pixels (black/dark-grey logo)
+                        if (a > 128 && (r+g+b) < 100) {
+                            // Center coordinates and scale up to world space
+                            const posX = (x - canvas.width / 2) * pixelToWorldScale;
+                            // Flip Y axis because canvas Y is opposite to 3D Y
+                            const posY = -(y - canvas.height / 2) * pixelToWorldScale;
+                            validPoints.push(posX, posY, 0);
+                        }
+                    }
+                }
+
+                if (validPoints.length === 0) {
+                    console.error("Could not extract any points from the logo image. Check file path and colors.");
+                    return;
+                }
+
+                // Fill the pre-allocated targetPositions array, recycling points if needed
+                for (let i = 0; i < config.particleCount; i++) {
+                    const sourceIndex = (i % (validPoints.length / 3)) * 3;
+                    targetPositions[i*3] = validPoints[sourceIndex];
+                    targetPositions[i*3+1] = validPoints[sourceIndex+1];
+                    // Add slight Z noise for a 3D effect/thickness
+                    targetPositions[i*3+2] = (Math.random() - 0.5) * 2.0; 
+                }
+                
+                console.log(`Loaded ${validPoints.length / 3} base points for logo. Recycling up to ${config.particleCount} particles.`);
+            };
+            img.onerror = () => {
+                console.error("Error loading image. Check file path: " + url);
+            };
+        }
+
+        // ================= MediaPipe Hands Setup =================
+        function onResults(results) {
+            handOpenness.left = 0;
+            handOpenness.right = 0;
+
+            if (results.multiHandLandmarks) {
+                // If two hands are detected, we use the average, but for simplicity, we find the MAX openness.
+                let maxOpenness = 0; 
+                for (const landmarks of results.multiHandLandmarks) {
+                    // Calculate openness: Average distance of fingertips to wrist
+                    const wrist = landmarks[0];
+                    const fingertips = [4, 8, 12, 16, 20]; // Thumb to Pinky tips
+                    let totalDist = 0;
+
+                    for (const tipIdx of fingertips) {
+                        const tip = landmarks[tipIdx];
+                        // 3D Euclidean distance
+                        const dist = Math.sqrt(
+                            Math.pow(tip.x - wrist.x, 2) +
+                            Math.pow(tip.y - wrist.y, 2) +
+                            Math.pow(tip.z - wrist.z, 2)
+                        );
+                        totalDist += dist;
+                    }
+                    
+                    const avgDist = totalDist / 5;
+                    // Normalize: Map the distance (e.g., 0.15 closed to 0.4 open) to 0.0->1.0
+                    let openness = (avgDist - 0.15) * 4.0; 
+                    openness = Math.max(0, Math.min(1, openness)); // Clamp between 0 and 1
+                    
+                    maxOpenness = Math.max(maxOpenness, openness);
+                }
+                // Store the result in the right bucket for the smoothing step
+                handOpenness.right = maxOpenness; 
+            } else {
+                 // If no hands detected, slowly return to a neutral (closed) state
+                handOpenness.right = 0; 
+            }
+        }
+
+        function initMediaPipe() {
+            const videoElement = document.getElementsByClassName('input_video')[0];
+            const hands = new Hands({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }});
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            hands.onResults(onResults);
+
+            const cameraUtils = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 640,
+                height: 480
+            });
+            cameraUtils.start();
+        }
+
+        // ================= UI Setup (Tweakpane) =================
+        function initUI() {
+            const pane = new Tweakpane.Pane({ title: 'Tectake Controls', expanded: true });
+
+            const colorFolder = pane.addFolder({ title: 'Color & Size' });
+            colorFolder.addInput(config, 'baseColor', { label: 'Particle Color' })
+                .on('change', (ev) => {
+                    particleMaterial.color.set(ev.value);
+                });
+
+            colorFolder.addInput(config, 'particleSize', { min: 0.05, max: 0.5, label: 'Base Size' });
+            
+            const gestureFolder = pane.addFolder({ title: 'Hand Reaction' });
+            gestureFolder.addInput(config, 'expansionStrength', { min: 1.0, max: 20.0, step: 0.5, label: 'Expansion Scale' });
+        }
+
+        // ================= Main Loop =================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Calculate smoothed combined hand openness factor
+            // We use right hand value (which stores the max openness detected)
+            const targetOpenness = handOpenness.right; 
+            // Linear interpolation for smoothness (Reacts instantly but visually smooth)
+            smoothedOpenness += (targetOpenness - smoothedOpenness) * 0.3; 
+
+            // 2. React to gestures: Particle Scaling (Tension/Size)
+            // When hands close (tension is high, smoothedOpenness approaches 0), particles get bigger.
+            const tensionFactor = 1.0 - smoothedOpenness;
+            // Scale size from base size up to 3x base size based on tension
+            particleMaterial.size = config.particleSize * (1.0 + tensionFactor * 2.0); 
+
+            // 3. React to gestures: Expansion Position
+            // Particles expand away from center when hands open (smoothedOpenness approaches 1).
+            // Expansion starts at 1.0 (no expansion) and goes up to config.expansionStrength
+            const expansionFactor = 1.0 + (smoothedOpenness * config.expansionStrength);
+
+            const positions = particles.geometry.attributes.position.array;
+
+            for (let i = 0; i < config.particleCount; i++) {
+                const i3 = i * 3;
+                // Base target position from the logo template
+                const tx = targetPositions[i3];
+                const ty = targetPositions[i3 + 1];
+                const tz = targetPositions[i3 + 2];
+
+                // Apply expansion: move away from center (0,0,0) based on openness
+                // This creates the "explosion" or "dissolving" effect
+                positions[i3] = tx * expansionFactor;
+                positions[i3 + 1] = ty * expansionFactor;
+                positions[i3 + 2] = tz * expansionFactor;
+            }
+
+            particles.geometry.attributes.position.needsUpdate = true;
+
+            // Slight rotation for visual interest
+            particles.rotation.y += 0.003;
+            particles.rotation.z += 0.001;
+
+            renderer.render(scene, camera);
+        }
+
+        // ================= Initialization =================
+        // Ensure image loading is called before Three.js starts the render loop
+        loadTectakeImage(config.logoFile); 
+        initThree();
+        initUI();
+        initMediaPipe();
+        animate(); // Start the animation loop
+    </script>
+</body>
+</html>
