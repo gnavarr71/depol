@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand-Controlled Particle Image</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: purple; color: #ff0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #webcam-container { position: absolute; top: 10px; right: 10px; width: 160px; height: 120px; transform: scaleX(-1); overflow: hidden; border-radius: 8px; border: 2px solid yellow; z-index: 100; }
+        #webcam-video { width: 100%; height: 100%; object-fit: cover; }
+        #instructions { position: fixed; bottom: 20px; left: 20px; background-color: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 8px; z-index: 1000; max-width: 300px; border: 1px solid yellow; }
+        #instructions h2 { margin-top: 0; color: yellow; }
+        #loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: purple; display: flex; justify-content: center; align-items: center; z-index: 2000; }
+        #loading-text { font-size: 2em; color: yellow; }
+        canvas { display: block; }
+    </style>
+    <!-- Use reliable CDNs -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.4.1646424915/camera_utils.js"></script>
+</head>
+<body>
+    <div id="webcam-container"><video id="webcam-video" autoplay playsinline></video></div>
+    <canvas id="three-canvas"></canvas>
+    <div id="instructions">
+        <h2>Controls</h2>
+        <ul><li><strong>Open Hand:</strong> Expand / Explode</li><li><strong>Fist:</strong> Contract / Condense</li><li><strong>Move Hands:</strong> Direct Particles</li></ul>
+        <p>Ensure webcam is on and hands are visible. Try on a desktop/laptop for best results.</p>
+    </div>
+    <div id="loading-screen"><div id="loading-text">Loading Particle System...</div></div>
+
+    <script>
+        let scene, camera, renderer, particles, geometry, material, pointsData = null, velocities = [];
+        const particleCount = 10000; // Adjust for mobile performance
+        const canvas = document.getElementById('three-canvas');
+        const videoElement = document.getElementById('webcam-video');
+        let handsData = { left: null, right: null };
+        let handStatus = { leftTension: 0, rightTension: 0 };
+        let firstFrame = true;
+
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            scene.background = new THREE.Color('purple');
+
+            material = new THREE.PointsMaterial({ size: 0.05, color: 0xFFFF00, blending: THREE.AdditiveBlending, depthTest: false, transparent: true });
+            geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount; i++) {
+                positions[i*3] = (Math.random()-0.5)*10;
+                positions[i*3+1] = (Math.random()-0.5)*10;
+                positions[i*3+2] = (Math.random()-0.5)*10;
+                velocities.push(new THREE.Vector3(0,0,0));
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+            camera.position.z = 10;
+            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+        }
+
+        async function loadImageAndSample() {
+            return new Promise((resolve) => {
+                const loader = new THREE.TextureLoader();
+                // Assumes 'image_0.png' is reachable by relative path in the environment.
+                const imgPath = 'image_0.png'; 
+
+                loader.load(
+                    imgPath,
+                    (texture) => {
+                        console.log('Image texture loaded');
+                        pointsData = sampleImage(texture.image);
+                        resolve(true);
+                    },
+                    undefined,
+                    (err) => {
+                        console.error('An error happened loading image', err);
+                        // Fallback: simple sphere of particles for robust testing
+                        const fallbackData = [];
+                        for(let i=0; i<particleCount; i++) {
+                            fallbackData.push({x: (Math.random()-0.5)*5, y: (Math.random()-0.5)*5, z: (Math.random()-0.5)*1});
+                        }
+                        pointsData = fallbackData;
+                        // Add some info
+                        document.getElementById('loading-text').textContent = 'Image Load Failed. Fallback mode.';
+                        resolve(false);
+                    }
+                );
+            });
+        }
+
+        function sampleImage(image) {
+            const tempCanvas = document.createElement('canvas');
+            const ctx = tempCanvas.getContext('2d');
+            tempCanvas.width = image.width;
+            tempCanvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+            const imageData = ctx.getImageData(0, 0, image.width, image.height).data;
+            const points = [];
+            
+            // Sample positions by selecting colored pixels and scaling
+            for (let y = 0; y < image.height; y += 1) {
+                for (let x = 0; x < image.width; x += 1) {
+                    const index = (y * image.width + x) * 4;
+                    if (imageData[index+3] > 100) { // Keep if alpha > 100
+                         points.push({
+                            x: (x - image.width / 2) * 0.02, // Adjust scaling
+                            y: -(y - image.height / 2) * 0.02, // Flip Y axis
+                            z: (Math.random()-0.5) * 1 // Add initial depth
+                        });
+                    }
+                }
+            }
+            
+            // Limit points to particleCount
+            const sampled = points.slice(0, particleCount);
+             // Pad if needed
+            while (sampled.length < particleCount && sampled.length > 0) {
+                 sampled.push(sampled[Math.floor(Math.random() * sampled.length)]);
+            }
+            // Add some base points if empty to avoid issues
+            while (sampled.length < particleCount) {
+                 sampled.push({x:0, y:0, z:0});
+            }
+
+            console.log(`Sampled ${sampled.length} points from image`);
+            return sampled;
+        }
+
+        function applyImageToParticles() {
+            if (!pointsData) return;
+            const positions = geometry.attributes.position.array;
+            for (let i = 0; i < pointsData.length; i++) {
+                positions[i * 3] = pointsData[i].x;
+                positions[i * 3 + 1] = pointsData[i].y;
+                positions[i * 3 + 2] = pointsData[i].z;
+            }
+            geometry.attributes.position.needsUpdate = true;
+        }
+
+        function getHandState(landmarks) {
+            if (!landmarks) return 0;
+            const wrist = landmarks[0];
+            let distanceSum = 0;
+            const tipIndices = [4, 8, 12, 16, 20];
+            for (const tip of tipIndices) {
+                distanceSum += Math.sqrt(
+                    Math.pow(landmarks[tip].x - wrist.x, 2) +
+                    Math.pow(landmarks[tip].y - wrist.y, 2) +
+                    Math.pow(landmarks[tip].z - wrist.z, 2)
+                );
+            }
+            const averageDistance = distanceSum / tipIndices.length;
+            // Fist: close, averageDistance < 0.1. Open: spread, averageDistance > 0.25. 
+            // Map: smaller distance means higher mapping (fist=1, open=0)
+            return 1 - Math.min(1, Math.max(0, (averageDistance - 0.1) / 0.15));
+        }
+
+        function onResults(results) {
+            handsData.left = null; handsData.right = null;
+            if (results.multiHandLandmarks) {
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const landmarks = results.multiHandLandmarks[i];
+                    const handedness = results.multiHandedness[i].label;
+                    if (handedness === 'Left') {
+                        handsData.left = landmarks;
+                        handStatus.leftTension = getHandState(landmarks);
+                    }
+                    if (handedness === 'Right') {
+                        handsData.right = landmarks;
+                        handStatus.rightTension = getHandState(landmarks);
+                    }
+                }
+            }
+        }
+
+        async function initMediaPipe() {
+            return new Promise((resolve) => {
+                const hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
+                });
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                hands.onResults(onResults);
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => await hands.send({ image: videoElement }),
+                    width: 640, height: 480
+                });
+                camera.start();
+                resolve();
+            });
+        }
+
+        function updateParticlePositions() {
+            const positions = geometry.attributes.position.array;
+            const hasHands = handsData.left || handsData.right;
+            const viewRadius = 15;
+            const baseForce = 0.003;
+            const pushForceBase = 0.05;
+            const pullForceBase = 0.05;
+
+            for (let i = 0; i < particleCount; i++) {
+                const base = pointsData[i];
+                let pos = new THREE.Vector3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+                let vel = velocities[i];
+                let force = new THREE.Vector3(0, 0, 0);
+
+                // Relax/Follow base
+                 const baseDir = new THREE.Vector3(base.x, base.y, base.z).sub(pos);
+                 force.add(baseDir.multiplyScalar(baseForce));
+
+                // Hand effects
+                if (hasHands) {
+                     const processHand = (landmarks, tension) => {
+                         const interactionPoint = new THREE.Vector3((landmarks[9].x - 0.5) * 10, -(landmarks[9].y - 0.5) * 10, landmarks[9].z * 1);
+                         const distVec = pos.clone().sub(interactionPoint);
+                         const dist = distVec.length();
+                         const dir = distVec.normalize();
+                         const interactionRad = 4;
+                         
+                         // Open Hand (Tension low < 0.4): Push from hand position (explode)
+                         if (tension < 0.4) {
+                             if (dist < interactionRad) {
+                                 // Force inversly related to distance, and directly to tension. (But low tension is open).
+                                 // Let's use 1-tension, so high for open, low for fist.
+                                 force.add(dir.multiplyScalar(pushForceBase * (1-tension) * (interactionRad - dist)));
+                             }
+                         }
+                         // Fist (Tension high > 0.6): Pull to hand position (condense)
+                         else if (tension > 0.6) {
+                             if (dist < interactionRad) {
+                                 force.add(interactionPoint.clone().sub(pos).multiplyScalar(pullForceBase * tension));
+                             }
+                         }
+                          // Follow (always direct)
+                          force.add(interactionPoint.clone().sub(pos).multiplyScalar(0.0005));
+                     }
+
+                     if(handsData.left) processHand(handsData.left, handStatus.leftTension);
+                     if(handsData.right) processHand(handsData.right, handStatus.rightTension);
+                }
+                
+                vel.add(force);
+                // Damping
+                vel.multiplyScalar(0.96); 
+                pos.add(vel);
+
+                // Bounds clamping
+                pos.x = Math.max(-viewRadius, Math.min(viewRadius, pos.x));
+                pos.y = Math.max(-viewRadius, Math.min(viewRadius, pos.y));
+                pos.z = Math.max(-viewRadius, Math.min(viewRadius, pos.z));
+
+                positions[i * 3] = pos.x;
+                positions[i * 3 + 1] = pos.y;
+                positions[i * 3 + 2] = pos.z;
+            }
+            geometry.attributes.position.needsUpdate = true;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (firstFrame && pointsData) {
+                 firstFrame = false;
+                 applyImageToParticles();
+            }
+            updateParticlePositions();
+            particles.rotation.y += 0.001; // subtle rotation
+            renderer.render(scene, camera);
+        }
+
+        async function start() {
+            initThree();
+            await loadImageAndSample();
+            await initMediaPipe();
+            document.getElementById('loading-screen').style.display = 'none';
+            animate();
+        }
+
+        start();
+    </script>
+</body>
+</html>
