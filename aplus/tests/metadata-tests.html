@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Metadata tests</title>
+</head>
+<body data-status="running">
+  <pre id="result">Running...</pre>
+  <script type="module">
+    import {
+      SYNTHETIC_PERFORMER_SUBJECT,
+      addAiSuffix,
+      detectFormat,
+      extractXmpPacket,
+      getXmpSubjects,
+      mergeXmpSubject,
+      writeSyntheticPerformerMetadata,
+      xmpContainsSubject,
+    } from "../assets/metadata.js";
+
+    const output = document.getElementById("result");
+    const log = [];
+
+    function assert(condition, message) {
+      if (!condition) throw new Error(message);
+      log.push(`PASS: ${message}`);
+    }
+
+    async function loadBytes(path) {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Could not load ${path}`);
+      return new Uint8Array(await response.arrayBuffer());
+    }
+
+    async function assertDecodes(bytes, type, width = 16, height = 12) {
+      const bitmap = await createImageBitmap(new Blob([bytes], { type }));
+      assert(bitmap.width === width && bitmap.height === height, `${type} still decodes at original dimensions`);
+      bitmap.close();
+    }
+
+    async function testFormat(path, type, expectedFormat) {
+      const original = await loadBytes(path);
+      assert(detectFormat(original, type) === expectedFormat, `${expectedFormat} format detected`);
+
+      const first = writeSyntheticPerformerMetadata(original, type);
+      assert(first.format === expectedFormat, `${expectedFormat} metadata writer selected`);
+      const extracted = extractXmpPacket(first.bytes, type);
+      assert(Boolean(extracted.xmp), `${expectedFormat} contains embedded XMP`);
+      assert(xmpContainsSubject(extracted.xmp), `${expectedFormat} contains synthetic performer subject`);
+      await assertDecodes(first.bytes, type);
+
+      const second = writeSyntheticPerformerMetadata(first.bytes, type);
+      const secondXmp = extractXmpPacket(second.bytes, type).xmp;
+      const values = getXmpSubjects(secondXmp);
+      const count = values.filter((value) => value === SYNTHETIC_PERFORMER_SUBJECT).length;
+      assert(count === 1, `${expectedFormat} metadata write is idempotent`);
+      await assertDecodes(second.bytes, type);
+    }
+
+    async function run() {
+      assert(addAiSuffix("photo.jpg") === "photo_ai.jpg", "suffix is inserted before extension");
+      assert(addAiSuffix("photo_ai.JPG") === "photo_ai.JPG", "suffix is not duplicated");
+      assert(addAiSuffix("photo") === "photo_ai", "suffix works without extension");
+
+      const existing = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <dc:subject><rdf:Bag><rdf:li>existing-keyword</rdf:li></rdf:Bag></dc:subject>
+            </rdf:Description>
+          </rdf:RDF>
+        </x:xmpmeta><?xpacket end="w"?>`;
+      const merged = mergeXmpSubject(existing);
+      const subjects = getXmpSubjects(merged.xmp);
+      assert(subjects.includes("existing-keyword"), "existing dc:subject value is preserved");
+      assert(subjects.includes(SYNTHETIC_PERFORMER_SUBJECT), "new dc:subject value is appended");
+
+      const unrelated = `<x:xmpmeta xmlns:x="adobe:ns:meta/">
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:creator><rdf:Seq><rdf:li>${SYNTHETIC_PERFORMER_SUBJECT}</rdf:li></rdf:Seq></dc:creator>
+          </rdf:Description>
+        </rdf:RDF>
+      </x:xmpmeta>`;
+      assert(!xmpContainsSubject(unrelated), "an rdf:li outside dc:subject is ignored");
+      assert(getXmpSubjects(unrelated).length === 0, "only dc:subject values are returned");
+
+      const attributeSubject = `<x:xmpmeta xmlns:x="adobe:ns:meta/">
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" dc:subject="attribute-keyword"/>
+        </rdf:RDF>
+      </x:xmpmeta>`;
+      const mergedAttribute = mergeXmpSubject(attributeSubject);
+      const attributeValues = getXmpSubjects(mergedAttribute.xmp);
+      assert(attributeValues.includes("attribute-keyword"), "dc:subject attribute value is preserved");
+      assert(attributeValues.includes(SYNTHETIC_PERFORMER_SUBJECT), "dc:subject attribute is converted to a Bag");
+
+      await testFormat("fixtures/sample.jpg", "image/jpeg", "jpeg");
+      await testFormat("fixtures/sample.png", "image/png", "png");
+      await testFormat("fixtures/sample.webp", "image/webp", "webp");
+
+      document.body.dataset.status = "pass";
+      output.textContent = `${log.join("\n")}\n\nALL TESTS PASSED`;
+    }
+
+    run().catch((error) => {
+      document.body.dataset.status = "fail";
+      output.textContent = `${log.join("\n")}\n\nFAIL: ${error.stack || error.message}`;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Clasifica imágenes en el navegador, renombra entornos y añade la etiqueta XMP dc:subject requerida.">
+  <title>Entorno AI | Clasificador y etiquetador XMP</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Saltar al contenido</a>
+
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#" aria-label="Entorno AI, inicio">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img">
+            <path d="M8 7h24a1 1 0 0 1 1 1v24a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="2"/>
+            <path d="m11 27 6.2-7.4 4.4 4.7 3.4-3.7 4 6.4H11Z" fill="currentColor" opacity=".78"/>
+            <circle cx="26.5" cy="14" r="3" fill="currentColor"/>
+          </svg>
+        </span>
+        <span>
+          <strong>Entorno AI</strong>
+          <small>Clasificador y etiquetador XMP</small>
+        </span>
+      </a>
+      <span class="privacy-badge">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.8 16 4v4.7c0 4.1-2.4 7.3-6 9.3-3.6-2-6-5.2-6-9.3V4l6-2.2Zm0 3.1a2.5 2.5 0 0 0-2.5 2.5v1H6.4v5.3h7.2V8.4h-1.1v-1A2.5 2.5 0 0 0 10 4.9Zm0 1.5c.6 0 1 .4 1 1v1H9v-1c0-.6.4-1 1-1Z" fill="currentColor"/></svg>
+        Procesamiento local
+      </span>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero shell" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">Flujo automático sin backend</p>
+        <h1 id="hero-title">Clasifica, etiqueta y descarga tus imágenes en un solo ZIP</h1>
+        <p class="hero-lead">
+          Arrastra imágenes o selecciónalas. La app identifica entornos, detecta personas o partes del cuerpo,
+          aplica el sufijo <code>_ai</code> y escribe <code>contains-synthetic-performer</code> en
+          <code>XMP dc:subject</code> cuando corresponde.
+        </p>
+        <div class="feature-row" aria-label="Características principales">
+          <span><b>1</b> Análisis local</span>
+          <span><b>2</b> Metadatos XMP</span>
+          <span><b>3</b> ZIP automático</span>
+        </div>
+      </div>
+      <aside class="rule-card" aria-label="Reglas de procesamiento">
+        <h2>Reglas aplicadas</h2>
+        <div class="rule rule-person">
+          <span class="rule-icon" aria-hidden="true">01</span>
+          <div><strong>Entorno con personas</strong><small>Renombra con _ai y añade el metadato XMP.</small></div>
+        </div>
+        <div class="rule rule-empty">
+          <span class="rule-icon" aria-hidden="true">02</span>
+          <div><strong>Entorno sin personas</strong><small>Renombra con _ai, sin modificar metadatos.</small></div>
+        </div>
+        <div class="rule rule-other">
+          <span class="rule-icon" aria-hidden="true">03</span>
+          <div><strong>No es un entorno</strong><small>Conserva nombre y contenido sin cambios.</small></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="workspace shell" aria-labelledby="workspace-title">
+      <div class="workspace-heading">
+        <div>
+          <p class="eyebrow">Selección de archivos</p>
+          <h2 id="workspace-title">Prepara el lote</h2>
+        </div>
+        <button id="clearButton" class="button button-ghost button-small" type="button" hidden>Vaciar lista</button>
+      </div>
+
+      <div id="dropZone" class="drop-zone" aria-describedby="drop-help">
+        <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple hidden>
+        <div class="drop-illustration" aria-hidden="true">
+          <svg viewBox="0 0 120 94">
+            <rect x="22" y="17" width="76" height="60" rx="9" fill="none" stroke="currentColor" stroke-width="3" opacity=".35"/>
+            <path d="m32 65 18-20 12 13 9-10 17 17H32Z" fill="currentColor" opacity=".25"/>
+            <circle cx="79" cy="36" r="7" fill="currentColor" opacity=".42"/>
+            <path d="M60 7v33m0-33L48 19M60 7l12 12" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h3 id="drop-title">Arrastra aquí tus imágenes</h3>
+        <p>o pulsa para elegir varios archivos</p>
+        <button id="chooseButton" class="button button-secondary" type="button">Seleccionar imágenes</button>
+        <small id="drop-help">Formatos admitidos: JPG, PNG y WebP. Las imágenes no se envían a ningún servidor.</small>
+      </div>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section id="queueSection" class="queue-section" aria-labelledby="queue-title" hidden>
+        <div class="queue-toolbar">
+          <div>
+            <h3 id="queue-title">Imágenes seleccionadas</h3>
+            <p id="queueSummary">0 archivos</p>
+          </div>
+          <div class="legend" aria-label="Leyenda de resultados">
+            <span><i class="dot dot-person"></i> Entorno + persona</span>
+            <span><i class="dot dot-empty"></i> Entorno vacío</span>
+            <span><i class="dot dot-other"></i> Sin cambios</span>
+          </div>
+        </div>
+        <div id="fileList" class="file-list"></div>
+      </section>
+
+      <details class="settings-card">
+        <summary>
+          <span>
+            <strong>Ajustes de sensibilidad</strong>
+            <small>Los valores predeterminados priorizan la detección de partes del cuerpo.</small>
+          </span>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 7.5 4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </summary>
+        <div class="settings-grid">
+          <label class="range-field" for="environmentThreshold">
+            <span><b>Umbral de entorno</b><output id="environmentThresholdValue">52%</output></span>
+            <input id="environmentThreshold" type="range" min="0.35" max="0.75" value="0.52" step="0.01">
+            <small>Súbelo para exigir más evidencia de que la imagen muestra un lugar o escena.</small>
+          </label>
+          <label class="range-field" for="personThreshold">
+            <span><b>Umbral de persona o parte corporal</b><output id="personThresholdValue">42%</output></span>
+            <input id="personThreshold" type="range" min="0.25" max="0.70" value="0.42" step="0.01">
+            <small>Bájalo para ser más sensible a manos, rostros, siluetas o personas parciales.</small>
+          </label>
+          <label class="check-field" for="autoDownload">
+            <input id="autoDownload" type="checkbox" checked>
+            <span><b>Descargar automáticamente</b><small>Inicia la descarga del ZIP al terminar.</small></span>
+          </label>
+        </div>
+      </details>
+
+      <section id="progressPanel" class="progress-panel" aria-live="polite" hidden>
+        <div class="progress-header">
+          <div>
+            <p id="progressEyebrow" class="eyebrow">Preparando</p>
+            <h3 id="progressTitle">Cargando el modelo de análisis</h3>
+          </div>
+          <strong id="progressPercent">0%</strong>
+        </div>
+        <div class="progress-track" aria-hidden="true"><span id="progressBar"></span></div>
+        <p id="progressDetail">La primera ejecución descarga el modelo y lo guarda en la caché del navegador.</p>
+      </section>
+
+      <div class="action-bar">
+        <div class="action-copy">
+          <strong id="actionTitle">Todo listo para empezar</strong>
+          <span id="actionSubtitle">Selecciona al menos una imagen.</span>
+        </div>
+        <div class="action-buttons">
+          <button id="downloadAgainButton" class="button button-secondary" type="button" hidden>Descargar ZIP</button>
+          <button id="processButton" class="button button-primary" type="button" disabled>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.3v10.2m0 0 3.8-3.8M10 12.5 6.2 8.7M3 15.2v2.3h14v-2.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Analizar y descargar ZIP
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="privacy-section shell" aria-labelledby="privacy-title">
+      <div class="privacy-icon" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M16 3 27 7v8.5C27 23 22.6 28.6 16 32 9.4 28.6 5 23 5 15.5V7l11-4Zm0 5.5a4.7 4.7 0 0 0-4.7 4.7V15H9v9.5h14V15h-2.3v-1.8A4.7 4.7 0 0 0 16 8.5Zm0 2.7c1.1 0 2 .9 2 2V15h-4v-1.8c0-1.1.9-2 2-2Z" fill="currentColor"/></svg>
+      </div>
+      <div>
+        <p class="eyebrow">Privacidad por diseño</p>
+        <h2 id="privacy-title">Tus archivos permanecen en tu dispositivo</h2>
+        <p>El análisis, la escritura de metadatos y la creación del ZIP se ejecutan dentro del navegador. Solo se descargan el motor de IA y el modelo; las imágenes nunca se suben.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <p>Entorno AI procesa JPG, PNG y WebP. La clasificación automática puede requerir revisión humana.</p>
+      <p><span id="runtimeStatus" class="runtime-status"><i></i> Modelo no cargado</span></p>
+    </div>
+  </footer>
+
+  <script src="vendor/jszip.min.js"></script>
+  <script type="module" src="assets/app.js"></script>
+</body>
+</html>
