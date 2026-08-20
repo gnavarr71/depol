@@ -1,0 +1,2517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>AI Image Classifier</title>
+
+  <!-- TensorFlow -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+
+  <!-- COCO SSD -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+  <!-- ZIP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <style>
+    body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 20px;
+    text-align: center;
+    color: #222;
+    background: #fff;
+    background-color: #FFFBEC;
+    }
+
+    h2 {
+      margin-bottom: 8px;
+    }
+
+    .description {
+      color: #666;
+      margin-top: 0;
+      margin-bottom: 24px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    #drop-zone {
+      border: 2px dashed #a0a0a0;
+      border-radius: 12px;
+      padding: 50px 20px;
+      cursor: pointer;
+      background: #fafafa;
+      transition:
+        border-color 0.2s ease,
+        background 0.2s ease;
+    }
+
+    #drop-zone.hover {
+      border-color: #2196F3;
+      background: #e3f2fd;
+    }
+
+    #drop-zone p {
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-weight: 600;
+      padding: 12px;
+      border-radius: 6px;
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .legend {
+      margin-top: 25px;
+      padding: 16px;
+      text-align: left;
+      background: #f7f7f7;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .legend strong {
+      display: inline-block;
+      min-width: 80px;
+    }
+  </style>
+</head>
+
+<body>
+<img src="christa.png" width="720" height="222" alt=""/>
+
+
+  <p class="description">
+    Automatically classifies images based on human presence,
+    environmental photography and isolated product photography.
+  </p>
+
+  <div id="drop-zone">
+    <p>
+      Click to select images,<br>
+      drag & drop images here,<br>
+      or paste from clipboard
+      (Ctrl+V / Cmd+V)
+    </p>
+
+    <input
+      type="file"
+      id="file-input"
+      multiple
+      accept="image/*"
+      style="display:none;"
+    >
+  </div>
+
+  <div id="status">
+    Loading AI Engine...
+  </div>
+
+  <div class="legend">
+    <strong>_mi</strong>
+    One or more humans visible
+
+    <br>
+
+    <strong>_ai</strong>
+    Environmental / lifestyle image without humans
+
+    <br>
+
+    <strong>No suffix</strong>
+    Isolated product/object on white background, or filename ending in PT04/PT05
+  </div><br>
+ <p class="description">By Guillermo Navarrete</p>
+<script>
+    // ============================================================
+    // GLOBALS
+    // ============================================================
+
+    let model = null;
+
+    const dropZone =
+      document.getElementById('drop-zone');
+
+    const fileInput =
+      document.getElementById('file-input');
+
+    const status =
+      document.getElementById('status');
+
+
+    // ============================================================
+    // 1. LOAD COCO-SSD
+    // ============================================================
+
+    cocoSsd
+      .load()
+      .then(loadedModel => {
+        model = loadedModel;
+
+        status.innerText =
+          "Ready to process images.";
+
+        status.style.background =
+          "#d4edda";
+
+        status.style.color =
+          "#155724";
+      })
+      .catch(error => {
+        console.error(
+          "AI model loading error:",
+          error
+        );
+
+        status.innerText =
+          "Could not load AI engine.";
+
+        status.style.background =
+          "#f8d7da";
+
+        status.style.color =
+          "#721c24";
+      });
+
+
+    // ============================================================
+    // 2. FILE INPUT
+    // ============================================================
+
+    dropZone.addEventListener(
+      'click',
+      () => fileInput.click()
+    );
+
+    fileInput.addEventListener(
+      'change',
+      e => {
+        processFiles(
+          e.target.files
+        );
+      }
+    );
+
+
+    // ============================================================
+    // DRAG & DROP
+    // ============================================================
+
+    dropZone.addEventListener(
+      'dragover',
+      e => {
+        e.preventDefault();
+
+        dropZone.classList.add(
+          'hover'
+        );
+      }
+    );
+
+    dropZone.addEventListener(
+      'dragleave',
+      () => {
+        dropZone.classList.remove(
+          'hover'
+        );
+      }
+    );
+
+    dropZone.addEventListener(
+      'drop',
+      e => {
+        e.preventDefault();
+
+        dropZone.classList.remove(
+          'hover'
+        );
+
+        if (
+          e.dataTransfer.files.length
+        ) {
+          processFiles(
+            e.dataTransfer.files
+          );
+        }
+      }
+    );
+
+
+    // ============================================================
+    // CLIPBOARD PASTE
+    // ============================================================
+
+    window.addEventListener(
+      'paste',
+      e => {
+        const clipboard =
+          e.clipboardData ||
+          e.originalEvent?.clipboardData;
+
+        if (!clipboard) {
+          return;
+        }
+
+        const items =
+          clipboard.items;
+
+        const files = [];
+
+        for (
+          const item of items
+        ) {
+          if (
+            item.type.indexOf('image') !== -1
+          ) {
+            const file =
+              item.getAsFile();
+
+            if (file) {
+              files.push(file);
+            }
+          }
+        }
+
+        if (
+          files.length
+        ) {
+          processFiles(files);
+        }
+      }
+    );
+
+
+    // ============================================================
+    // 3. MAIN PROCESSING
+    // ============================================================
+
+    async function processFiles(files) {
+
+      if (!model) {
+        alert(
+          "Please wait for the AI engine to finish loading."
+        );
+
+        return;
+      }
+
+      if (
+        !files ||
+        !files.length
+      ) {
+        return;
+      }
+
+      const zip =
+        new JSZip();
+
+      let count = 0;
+
+      try {
+
+        for (
+          let i = 0;
+          i < files.length;
+          i++
+        ) {
+
+          const file =
+            files[i];
+
+          if (
+            !file.type.startsWith(
+              'image/'
+            )
+          ) {
+            continue;
+          }
+
+
+          // ======================================================
+          // FILENAME PARTS
+          // ======================================================
+
+          const dotIndex =
+            file.name.lastIndexOf('.');
+
+          const baseName =
+            dotIndex !== -1
+              ? file.name.substring(
+                  0,
+                  dotIndex
+                )
+              : file.name;
+
+          const ext =
+            dotIndex !== -1
+              ? file.name.substring(
+                  dotIndex
+                )
+              : '.jpg';
+
+
+          // ======================================================
+          // FORCED NO-SUFFIX RULE
+          //
+          // Any image whose basename ends exactly in PT04 or PT05
+          // is classified as "No suffix", case-insensitively.
+          //
+          // Examples:
+          //   12345_PT04.jpg  -> 12345_PT04.jpg
+          //   12345pt05.png   -> 12345pt05.png
+          //
+          // This filename rule overrides all AI classification.
+          // ======================================================
+
+          const forceNoSuffixByName =
+            /(?:PT04|PT05)$/i.test(
+              baseName
+            );
+
+          if (
+            forceNoSuffixByName
+          ) {
+            status.innerText =
+              `Classifying image ${i + 1} of ${files.length}: forced No suffix (PT04/PT05)...`;
+
+            console.log(
+              "===================================="
+            );
+
+            console.log(
+              "FILE:",
+              file.name
+            );
+
+            console.log({
+              forcedByFilename: true,
+              matchedRule: "basename ends in PT04 or PT05",
+              finalClassification: "(no suffix)"
+            });
+
+            zip.file(
+              `${baseName}${ext}`,
+              file
+            );
+
+            count++;
+
+            continue;
+          }
+
+
+          status.innerText =
+            `Analyzing image ${i + 1} of ${files.length}...`;
+
+
+          // ------------------------------------------------------
+          // Load image
+          // ------------------------------------------------------
+
+          const img =
+            await loadImage(file);
+
+
+          // ------------------------------------------------------
+          // INITIAL FULL IMAGE AI DETECTION
+          //
+          // IMPORTANT:
+          //
+          // COCO's default confidence threshold is too high
+          // for some marketing compositions.
+          //
+          // Therefore explicitly use 0.15.
+          // ------------------------------------------------------
+
+          const predictions =
+            await model.detect(
+              img,
+              50,
+              0.15
+            );
+
+
+          // ------------------------------------------------------
+          // HUMAN DETECTION
+          //
+          // Performs:
+          //
+          // 1. full image detection
+          // 2. overlapping crop detection
+          //
+          // This takes priority over EVERYTHING else except the
+          // explicit PT04/PT05 filename override above.
+          // ------------------------------------------------------
+
+          status.innerText =
+            `Checking for humans ${i + 1} of ${files.length}...`;
+
+          const humanResult =
+            await detectHumansRobust(
+              img,
+              predictions
+            );
+
+          const hasPerson =
+            humanResult.hasHuman;
+
+
+          // ------------------------------------------------------
+          // OTHER DETECTED OBJECTS
+          // ------------------------------------------------------
+
+          const hasEnvObjects =
+            predictions.some(
+              p =>
+                p.class !== 'person' &&
+                p.score >= 0.35
+            );
+
+
+          // ------------------------------------------------------
+          // WHITE / ISOLATED PRODUCT CHECK
+          // ------------------------------------------------------
+
+          const isIsolatedWhiteObject =
+            analyzeWhiteBackgroundIsolation(
+              img,
+              predictions
+            );
+
+
+          // ------------------------------------------------------
+          // ENVIRONMENT CHECK
+          // ------------------------------------------------------
+
+          const isPhotoEnvironment =
+            analyzeSpatialGridEntropy(
+              img
+            );
+
+
+          // ======================================================
+          // CLASSIFICATION
+          // ======================================================
+
+          let suffix = '';
+
+
+          // ------------------------------------------------------
+          // PRIORITY 1:
+          //
+          // ANY HUMAN
+          // ------------------------------------------------------
+
+          if (hasPerson) {
+            suffix =
+              '_mi';
+          }
+
+
+          // ------------------------------------------------------
+          // PRIORITY 2:
+          //
+          // ISOLATED PRODUCT / OBJECT
+          //
+          // White or near-white background
+          // Shadows allowed
+          // Cropped objects allowed
+          // ------------------------------------------------------
+
+          else if (
+            isIsolatedWhiteObject
+          ) {
+            suffix =
+              '';
+          }
+
+
+          // ------------------------------------------------------
+          // PRIORITY 3:
+          //
+          // ENVIRONMENTAL PHOTO
+          // ------------------------------------------------------
+
+          else if (
+            hasEnvObjects ||
+            isPhotoEnvironment
+          ) {
+            suffix =
+              '_ai';
+          }
+
+
+          // ------------------------------------------------------
+          // EVERYTHING ELSE
+          // ------------------------------------------------------
+
+          else {
+            suffix =
+              '';
+          }
+
+
+          // ======================================================
+          // DEBUG INFORMATION
+          // ======================================================
+
+          console.log(
+            "===================================="
+          );
+
+          console.log(
+            "FILE:",
+            file.name
+          );
+
+          console.log(
+            "COCO predictions:",
+            predictions
+          );
+
+          console.log(
+            "Human detection:",
+            humanResult
+          );
+
+          console.log(
+            {
+              forcedByFilename: false,
+              hasPerson,
+              hasEnvObjects,
+              isIsolatedWhiteObject,
+              isPhotoEnvironment,
+              finalClassification:
+                suffix || "(no suffix)"
+            }
+          );
+
+
+          // ======================================================
+          // CREATE NEW FILENAME
+          // ======================================================
+
+          zip.file(
+            `${baseName}${suffix}${ext}`,
+            file
+          );
+
+          count++;
+        }
+
+
+        // ========================================================
+        // CREATE ZIP
+        // ========================================================
+
+        status.innerText =
+          "Creating ZIP package...";
+
+        const content =
+          await zip.generateAsync({
+            type: "blob"
+          });
+
+        const downloadURL =
+          URL.createObjectURL(
+            content
+          );
+
+        const link =
+          document.createElement(
+            'a'
+          );
+
+        link.href =
+          downloadURL;
+
+        link.download =
+          `classified_images_${Date.now()}.zip`;
+
+        document.body.appendChild(
+          link
+        );
+
+        link.click();
+
+        link.remove();
+
+        setTimeout(
+          () => {
+            URL.revokeObjectURL(
+              downloadURL
+            );
+          },
+          1000
+        );
+
+        status.innerText =
+          `Completed! Processed ${count} images.`;
+
+        status.style.background =
+          "#d4edda";
+
+        status.style.color =
+          "#155724";
+
+        // Allows selecting the same files again
+        fileInput.value = '';
+      }
+
+      catch (error) {
+        console.error(
+          "Processing error:",
+          error
+        );
+
+        status.innerText =
+          "An error occurred while processing the images.";
+
+        status.style.background =
+          "#f8d7da";
+
+        status.style.color =
+          "#721c24";
+      }
+    }
+
+
+    // ============================================================
+    // 4. ROBUST HUMAN DETECTION
+    //
+    // Detects:
+    //
+    // - one person
+    // - several people
+    // - standing person
+    // - seated person
+    // - partially visible person
+    // - person in marketing compositions
+    // - person surrounded by text / graphics
+    //
+    // Uses:
+    //
+    // 1. whole image
+    // 2. overlapping enlarged crops
+    // ============================================================
+
+    async function detectHumansRobust(
+      img,
+      fullPredictions = null
+    ) {
+
+      const imageWidth =
+        img.naturalWidth ||
+        img.width;
+
+      const imageHeight =
+        img.naturalHeight ||
+        img.height;
+
+
+      // ----------------------------------------------------------
+      // FULL IMAGE DETECTION
+      // ----------------------------------------------------------
+
+      const predictions =
+        fullPredictions ||
+        await model.detect(
+          img,
+          50,
+          0.15
+        );
+
+      const validFullPersons =
+        predictions.filter(
+          prediction =>
+            isValidPersonDetection(
+              prediction,
+              imageWidth,
+              imageHeight,
+              false
+            )
+        );
+
+
+      // ----------------------------------------------------------
+      // A strong whole-image person detection
+      // immediately gives _mi.
+      // ----------------------------------------------------------
+
+      if (
+        validFullPersons.some(
+          person =>
+            person.score >= 0.28
+        )
+      ) {
+
+        return {
+          hasHuman: true,
+
+          count:
+            validFullPersons.length,
+
+          method:
+            'full-image',
+
+          persons:
+            validFullPersons.map(
+              person => ({
+                score:
+                  Number(
+                    person.score.toFixed(3)
+                  ),
+
+                bbox:
+                  person.bbox.map(
+                    value =>
+                      Math.round(value)
+                  )
+              })
+            )
+        };
+      }
+
+
+      // ==========================================================
+      // OVERLAPPING IMAGE CROPS
+      // ==========================================================
+      //
+      // Marketing compositions can have large areas of:
+      //
+      // - typography
+      // - white space
+      // - logos
+      // - feature boxes
+      //
+      // These can make a person small compared with the
+      // complete canvas.
+      //
+      // Cropping makes humans larger for COCO.
+      // ==========================================================
+
+      const tileWidth =
+        Math.round(
+          imageWidth * 0.62
+        );
+
+      const tileHeight =
+        Math.round(
+          imageHeight * 0.62
+        );
+
+      const xPositions = [
+        0,
+        Math.max(
+          0,
+          imageWidth - tileWidth
+        )
+      ];
+
+      const yPositions = [
+        0,
+        Math.max(
+          0,
+          imageHeight - tileHeight
+        )
+      ];
+
+      const tilePersonDetections =
+        [];
+
+      for (
+        const sourceY of yPositions
+      ) {
+
+        for (
+          const sourceX of xPositions
+        ) {
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+
+          // ------------------------------------------------------
+          // Resize each crop to a useful detection size.
+          // ------------------------------------------------------
+
+          const targetSize =
+            640;
+
+          const tileAspect =
+            tileWidth /
+            tileHeight;
+
+          if (
+            tileAspect >= 1
+          ) {
+            canvas.width =
+              targetSize;
+
+            canvas.height =
+              Math.round(
+                targetSize /
+                tileAspect
+              );
+          }
+
+          else {
+            canvas.height =
+              targetSize;
+
+            canvas.width =
+              Math.round(
+                targetSize *
+                tileAspect
+              );
+          }
+
+          const ctx =
+            canvas.getContext(
+              '2d',
+              {
+                willReadFrequently:
+                  false
+              }
+            );
+
+          ctx.drawImage(
+            img,
+
+            sourceX,
+            sourceY,
+            tileWidth,
+            tileHeight,
+
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+
+          // ------------------------------------------------------
+          // Run person/object detection on crop
+          // ------------------------------------------------------
+
+          const tilePredictions =
+            await model.detect(
+              canvas,
+              30,
+              0.15
+            );
+
+          for (
+            const prediction of
+            tilePredictions
+          ) {
+
+            if (
+              prediction.class !==
+              'person'
+            ) {
+              continue;
+            }
+
+            const [
+              bx,
+              by,
+              bw,
+              bh
+            ] =
+              prediction.bbox;
+
+
+            // ----------------------------------------------------
+            // Map cropped coordinates back to full image
+            // ----------------------------------------------------
+
+            const originalX =
+              sourceX +
+              (
+                bx /
+                canvas.width
+              ) *
+              tileWidth;
+
+            const originalY =
+              sourceY +
+              (
+                by /
+                canvas.height
+              ) *
+              tileHeight;
+
+            const originalW =
+              (
+                bw /
+                canvas.width
+              ) *
+              tileWidth;
+
+            const originalH =
+              (
+                bh /
+                canvas.height
+              ) *
+              tileHeight;
+
+            const mappedPrediction = {
+              class:
+                'person',
+
+              score:
+                prediction.score,
+
+              bbox: [
+                originalX,
+                originalY,
+                originalW,
+                originalH
+              ]
+            };
+
+            if (
+              isValidPersonDetection(
+                mappedPrediction,
+                imageWidth,
+                imageHeight,
+                true
+              )
+            ) {
+              tilePersonDetections.push(
+                mappedPrediction
+              );
+            }
+          }
+        }
+      }
+
+
+      // ----------------------------------------------------------
+      // Remove duplicate persons detected by overlapping crops.
+      // ----------------------------------------------------------
+
+      const uniqueTilePersons =
+        mergePersonDetections(
+          tilePersonDetections
+        );
+
+
+      // ----------------------------------------------------------
+      // A confident person inside any crop
+      // is enough for _mi.
+      // ----------------------------------------------------------
+
+      const strongTilePerson =
+        uniqueTilePersons.some(
+          person =>
+            person.score >= 0.25
+        );
+
+      if (
+        strongTilePerson
+      ) {
+
+        return {
+          hasHuman: true,
+
+          count:
+            uniqueTilePersons.length,
+
+          method:
+            'overlapping-tiles',
+
+          persons:
+            uniqueTilePersons.map(
+              person => ({
+                score:
+                  Number(
+                    person.score.toFixed(3)
+                  ),
+
+                bbox:
+                  person.bbox.map(
+                    value =>
+                      Math.round(value)
+                  )
+              })
+            )
+        };
+      }
+
+
+      // ==========================================================
+      // LOW CONFIDENCE CONFIRMATION
+      //
+      // If both:
+      //
+      // - whole image
+      // - enlarged crop
+      //
+      // independently found the same likely person,
+      // accept lower confidence.
+      // ==========================================================
+
+      if (
+        validFullPersons.length > 0 &&
+        uniqueTilePersons.length > 0
+      ) {
+
+        const confirmed =
+          validFullPersons.some(
+            fullPerson =>
+              uniqueTilePersons.some(
+                tilePerson =>
+                  boxesReferToSamePerson(
+                    fullPerson.bbox,
+                    tilePerson.bbox
+                  )
+              )
+          );
+
+        if (
+          confirmed
+        ) {
+
+          return {
+            hasHuman:
+              true,
+
+            count:
+              uniqueTilePersons.length,
+
+            method:
+              'confirmed-low-confidence',
+
+            persons:
+              uniqueTilePersons.map(
+                person => ({
+                  score:
+                    Number(
+                      person.score.toFixed(3)
+                    ),
+
+                  bbox:
+                    person.bbox.map(
+                      value =>
+                        Math.round(value)
+                    )
+                })
+              )
+          };
+        }
+      }
+
+
+      // ----------------------------------------------------------
+      // No human detected
+      // ----------------------------------------------------------
+
+      return {
+        hasHuman:
+          false,
+
+        count:
+          0,
+
+        method:
+          'none',
+
+        persons:
+          []
+      };
+    }
+
+
+    // ============================================================
+    // 5. VALIDATE PERSON DETECTION
+    // ============================================================
+
+    function isValidPersonDetection(
+      prediction,
+      imageWidth,
+      imageHeight,
+      fromTile
+    ) {
+
+      if (
+        prediction.class !==
+        'person'
+      ) {
+        return false;
+      }
+
+      const [
+        x,
+        y,
+        width,
+        height
+      ] =
+        prediction.bbox;
+
+      if (
+        width <= 0 ||
+        height <= 0
+      ) {
+        return false;
+      }
+
+      const imageArea =
+        imageWidth *
+        imageHeight;
+
+      const personArea =
+        width *
+        height;
+
+      const areaRatio =
+        personArea /
+        imageArea;
+
+      const widthRatio =
+        width /
+        imageWidth;
+
+      const heightRatio =
+        height /
+        imageHeight;
+
+
+      // ----------------------------------------------------------
+      // Reject extremely tiny detections.
+      //
+      // Cropped/tile detections may be slightly smaller.
+      // ----------------------------------------------------------
+
+      const minimumArea =
+        fromTile
+          ? 0.0018
+          : 0.0025;
+
+      if (
+        areaRatio <
+        minimumArea
+      ) {
+        return false;
+      }
+
+
+      // ----------------------------------------------------------
+      // Reject tiny icon-like shapes
+      // ----------------------------------------------------------
+
+      if (
+        widthRatio < 0.018 &&
+        heightRatio < 0.045
+      ) {
+        return false;
+      }
+
+
+      // ----------------------------------------------------------
+      // Absolute confidence floor
+      // ----------------------------------------------------------
+
+      if (
+        prediction.score < 0.17
+      ) {
+        return false;
+      }
+
+
+      // ----------------------------------------------------------
+      // Very wide horizontal boxes are unlikely to be people.
+      // ----------------------------------------------------------
+
+      const aspectRatio =
+        width /
+        height;
+
+      if (
+        aspectRatio > 2.4
+      ) {
+        return false;
+      }
+
+      return true;
+    }
+
+
+    // ============================================================
+    // 6. MERGE DUPLICATE HUMAN DETECTIONS
+    // ============================================================
+
+    function mergePersonDetections(
+      detections
+    ) {
+
+      const sorted =
+        [...detections].sort(
+          (a, b) =>
+            b.score -
+            a.score
+        );
+
+      const result =
+        [];
+
+      for (
+        const detection of sorted
+      ) {
+
+        const alreadyDetected =
+          result.some(
+            existing =>
+              boxesReferToSamePerson(
+                existing.bbox,
+                detection.bbox
+              )
+          );
+
+        if (
+          !alreadyDetected
+        ) {
+          result.push(
+            detection
+          );
+        }
+      }
+
+      return result;
+    }
+
+
+    // ============================================================
+    // 7. CHECK WHETHER TWO BOXES ARE THE SAME PERSON
+    // ============================================================
+
+    function boxesReferToSamePerson(
+      boxA,
+      boxB
+    ) {
+
+      const iou =
+        calculateIoU(
+          boxA,
+          boxB
+        );
+
+      if (
+        iou >= 0.30
+      ) {
+        return true;
+      }
+
+
+      // ----------------------------------------------------------
+      // One tile may only see part of the person.
+      //
+      // Therefore also compare center positions.
+      // ----------------------------------------------------------
+
+      const [
+        ax,
+        ay,
+        aw,
+        ah
+      ] =
+        boxA;
+
+      const [
+        bx,
+        by,
+        bw,
+        bh
+      ] =
+        boxB;
+
+      const centerAX =
+        ax +
+        aw / 2;
+
+      const centerAY =
+        ay +
+        ah / 2;
+
+      const centerBX =
+        bx +
+        bw / 2;
+
+      const centerBY =
+        by +
+        bh / 2;
+
+      const distance =
+        Math.sqrt(
+          Math.pow(
+            centerAX -
+            centerBX,
+            2
+          )
+          +
+          Math.pow(
+            centerAY -
+            centerBY,
+            2
+          )
+        );
+
+      const referenceSize =
+        Math.max(
+          aw,
+          ah,
+          bw,
+          bh
+        );
+
+      return (
+        distance <
+        referenceSize * 0.42
+      );
+    }
+
+
+    // ============================================================
+    // 8. INTERSECTION OVER UNION
+    // ============================================================
+
+    function calculateIoU(
+      boxA,
+      boxB
+    ) {
+
+      const [
+        ax,
+        ay,
+        aw,
+        ah
+      ] =
+        boxA;
+
+      const [
+        bx,
+        by,
+        bw,
+        bh
+      ] =
+        boxB;
+
+      const aRight =
+        ax +
+        aw;
+
+      const aBottom =
+        ay +
+        ah;
+
+      const bRight =
+        bx +
+        bw;
+
+      const bBottom =
+        by +
+        bh;
+
+      const intersectionX1 =
+        Math.max(
+          ax,
+          bx
+        );
+
+      const intersectionY1 =
+        Math.max(
+          ay,
+          by
+        );
+
+      const intersectionX2 =
+        Math.min(
+          aRight,
+          bRight
+        );
+
+      const intersectionY2 =
+        Math.min(
+          aBottom,
+          bBottom
+        );
+
+      const intersectionWidth =
+        Math.max(
+          0,
+          intersectionX2 -
+          intersectionX1
+        );
+
+      const intersectionHeight =
+        Math.max(
+          0,
+          intersectionY2 -
+          intersectionY1
+        );
+
+      const intersectionArea =
+        intersectionWidth *
+        intersectionHeight;
+
+      const areaA =
+        aw *
+        ah;
+
+      const areaB =
+        bw *
+        bh;
+
+      const union =
+        areaA +
+        areaB -
+        intersectionArea;
+
+      if (
+        union <= 0
+      ) {
+        return 0;
+      }
+
+      return (
+        intersectionArea /
+        union
+      );
+    }
+
+
+    // ============================================================
+    // 9. WHITE / STUDIO BACKGROUND DETECTION
+    //
+    // Returns TRUE for:
+    //
+    // - isolated product on white
+    // - multiple products on white
+    // - product with soft shadow
+    // - product on light gray/white studio background
+    // - cropped product
+    // - object touching one or more image edges
+    //
+    // TRUE = NO SUFFIX
+    // ============================================================
+
+    function analyzeWhiteBackgroundIsolation(
+      img,
+      predictions = []
+    ) {
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      const size =
+        180;
+
+      canvas.width =
+        size;
+
+      canvas.height =
+        size;
+
+      const ctx =
+        canvas.getContext(
+          '2d',
+          {
+            willReadFrequently:
+              true
+          }
+        );
+
+      ctx.drawImage(
+        img,
+        0,
+        0,
+        size,
+        size
+      );
+
+      const data =
+        ctx.getImageData(
+          0,
+          0,
+          size,
+          size
+        ).data;
+
+      const totalPixels =
+        size *
+        size;
+
+      let strictWhitePixels =
+        0;
+
+      let studioBackgroundPixels =
+        0;
+
+      let strictWhiteEdgePixels =
+        0;
+
+      let studioEdgePixels =
+        0;
+
+      let edgePixels =
+        0;
+
+
+      // ----------------------------------------------------------
+      // Pixel helpers
+      // ----------------------------------------------------------
+
+      function getPixel(
+        x,
+        y
+      ) {
+
+        const index =
+          (
+            y *
+            size +
+            x
+          ) * 4;
+
+        return {
+          r:
+            data[index],
+
+          g:
+            data[index + 1],
+
+          b:
+            data[index + 2],
+
+          a:
+            data[index + 3]
+        };
+      }
+
+
+      function getBrightness(
+        r,
+        g,
+        b
+      ) {
+
+        return (
+          0.2126 * r +
+          0.7152 * g +
+          0.0722 * b
+        );
+      }
+
+
+      // ----------------------------------------------------------
+      // Clean white
+      // ----------------------------------------------------------
+
+      function isStrictWhite(
+        r,
+        g,
+        b,
+        a
+      ) {
+
+        // Transparent background
+        if (
+          a < 100
+        ) {
+          return true;
+        }
+
+        const max =
+          Math.max(
+            r,
+            g,
+            b
+          );
+
+        const min =
+          Math.min(
+            r,
+            g,
+            b
+          );
+
+        const brightness =
+          getBrightness(
+            r,
+            g,
+            b
+          );
+
+        const chroma =
+          max -
+          min;
+
+        return (
+          brightness >= 238 &&
+          chroma <= 22 &&
+          min >= 220
+        );
+      }
+
+
+      // ----------------------------------------------------------
+      // Studio background:
+      //
+      // allows white + light neutral gray
+      // so that soft shadows remain valid.
+      // ----------------------------------------------------------
+
+      function isStudioBackground(
+        r,
+        g,
+        b,
+        a
+      ) {
+
+        if (
+          a < 100
+        ) {
+          return true;
+        }
+
+        const max =
+          Math.max(
+            r,
+            g,
+            b
+          );
+
+        const min =
+          Math.min(
+            r,
+            g,
+            b
+          );
+
+        const brightness =
+          getBrightness(
+            r,
+            g,
+            b
+          );
+
+        const chroma =
+          max -
+          min;
+
+        return (
+          brightness >= 205 &&
+          chroma <= 30
+        );
+      }
+
+
+      // ==========================================================
+      // ANALYZE IMAGE + EDGES
+      // ==========================================================
+
+      const edgeWidth =
+        12;
+
+      for (
+        let y = 0;
+        y < size;
+        y++
+      ) {
+
+        for (
+          let x = 0;
+          x < size;
+          x++
+        ) {
+
+          const {
+            r,
+            g,
+            b,
+            a
+          } =
+            getPixel(
+              x,
+              y
+            );
+
+          const strictWhite =
+            isStrictWhite(
+              r,
+              g,
+              b,
+              a
+            );
+
+          const studioBackground =
+            isStudioBackground(
+              r,
+              g,
+              b,
+              a
+            );
+
+          if (
+            strictWhite
+          ) {
+            strictWhitePixels++;
+          }
+
+          if (
+            studioBackground
+          ) {
+            studioBackgroundPixels++;
+          }
+
+          const isEdge =
+            x < edgeWidth ||
+            x >=
+              size -
+              edgeWidth ||
+            y < edgeWidth ||
+            y >=
+              size -
+              edgeWidth;
+
+          if (
+            isEdge
+          ) {
+
+            edgePixels++;
+
+            if (
+              strictWhite
+            ) {
+              strictWhiteEdgePixels++;
+            }
+
+            if (
+              studioBackground
+            ) {
+              studioEdgePixels++;
+            }
+          }
+        }
+      }
+
+      const strictWhiteRatio =
+        strictWhitePixels /
+        totalPixels;
+
+      const studioBackgroundRatio =
+        studioBackgroundPixels /
+        totalPixels;
+
+      const strictWhiteEdgeRatio =
+        strictWhiteEdgePixels /
+        edgePixels;
+
+      const studioEdgeRatio =
+        studioEdgePixels /
+        edgePixels;
+
+
+      // ==========================================================
+      // CORNER ANALYSIS
+      // ==========================================================
+      //
+      // We do NOT require all four corners to be white,
+      // because cropped products can touch image edges.
+      // ==========================================================
+
+      const cornerSize =
+        28;
+
+      const corners = [
+        [
+          0,
+          0
+        ],
+
+        [
+          size - cornerSize,
+          0
+        ],
+
+        [
+          0,
+          size - cornerSize
+        ],
+
+        [
+          size - cornerSize,
+          size - cornerSize
+        ]
+      ];
+
+      let cleanCorners =
+        0;
+
+      for (
+        const [
+          startX,
+          startY
+        ] of corners
+      ) {
+
+        let backgroundPixels =
+          0;
+
+        const cornerPixels =
+          cornerSize *
+          cornerSize;
+
+        for (
+          let y = startY;
+          y < startY + cornerSize;
+          y++
+        ) {
+
+          for (
+            let x = startX;
+            x < startX + cornerSize;
+            x++
+          ) {
+
+            const {
+              r,
+              g,
+              b,
+              a
+            } =
+              getPixel(
+                x,
+                y
+              );
+
+            if (
+              isStudioBackground(
+                r,
+                g,
+                b,
+                a
+              )
+            ) {
+              backgroundPixels++;
+            }
+          }
+        }
+
+        if (
+          backgroundPixels /
+          cornerPixels >=
+          0.72
+        ) {
+          cleanCorners++;
+        }
+      }
+
+
+      // ==========================================================
+      // DETECTED OBJECT AREAS
+      // ==========================================================
+
+      const objects =
+        predictions.filter(
+          p =>
+            p.class !==
+              'person' &&
+            p.score >
+              0.35
+        );
+
+      let outsideObjectPixels =
+        0;
+
+      let outsideStudioPixels =
+        0;
+
+      if (
+        objects.length
+      ) {
+
+        for (
+          let y = 0;
+          y < size;
+          y++
+        ) {
+
+          for (
+            let x = 0;
+            x < size;
+            x++
+          ) {
+
+            let insideObject =
+              false;
+
+            for (
+              const prediction of
+              objects
+            ) {
+
+              const [
+                bx,
+                by,
+                bw,
+                bh
+              ] =
+                prediction.bbox;
+
+              let x1 =
+                (
+                  bx /
+                  (
+                    img.naturalWidth ||
+                    img.width
+                  )
+                ) *
+                size;
+
+              let y1 =
+                (
+                  by /
+                  (
+                    img.naturalHeight ||
+                    img.height
+                  )
+                ) *
+                size;
+
+              let x2 =
+                (
+                  (
+                    bx +
+                    bw
+                  ) /
+                  (
+                    img.naturalWidth ||
+                    img.width
+                  )
+                ) *
+                size;
+
+              let y2 =
+                (
+                  (
+                    by +
+                    bh
+                  ) /
+                  (
+                    img.naturalHeight ||
+                    img.height
+                  )
+                ) *
+                size;
+
+
+              // --------------------------------------------------
+              // Expand object region slightly.
+              //
+              // Allows:
+              //
+              // - anti-aliased edges
+              // - soft shadows
+              // - imperfect COCO bounding boxes
+              // --------------------------------------------------
+
+              const padding =
+                5;
+
+              x1 -=
+                padding;
+
+              y1 -=
+                padding;
+
+              x2 +=
+                padding;
+
+              y2 +=
+                padding;
+
+              if (
+                x >= x1 &&
+                x <= x2 &&
+                y >= y1 &&
+                y <= y2
+              ) {
+                insideObject =
+                  true;
+
+                break;
+              }
+            }
+
+            if (
+              !insideObject
+            ) {
+
+              outsideObjectPixels++;
+
+              const {
+                r,
+                g,
+                b,
+                a
+              } =
+                getPixel(
+                  x,
+                  y
+                );
+
+              if (
+                isStudioBackground(
+                  r,
+                  g,
+                  b,
+                  a
+                )
+              ) {
+                outsideStudioPixels++;
+              }
+            }
+          }
+        }
+      }
+
+      const outsideStudioRatio =
+        outsideObjectPixels > 0
+          ? outsideStudioPixels /
+            outsideObjectPixels
+          : 0;
+
+
+      // ==========================================================
+      // RULE A:
+      //
+      // AI understands the product/object.
+      // Check whether surrounding area is white/studio.
+      // ==========================================================
+
+      const detectedObjectOnWhite =
+        objects.length > 0 &&
+        strictWhiteRatio >= 0.18 &&
+        outsideStudioRatio >= 0.78 &&
+        studioEdgeRatio >= 0.52 &&
+        cleanCorners >= 2;
+
+
+      // ==========================================================
+      // RULE B:
+      //
+      // COCO does NOT understand the product.
+      //
+      // Use visual white-background characteristics instead.
+      // ==========================================================
+
+      const visuallyIsolatedOnWhite =
+        studioBackgroundRatio >= 0.55 &&
+        strictWhiteRatio >= 0.30 &&
+        studioEdgeRatio >= 0.68 &&
+        strictWhiteEdgeRatio >= 0.38 &&
+        cleanCorners >= 2;
+
+      const result =
+        detectedObjectOnWhite ||
+        visuallyIsolatedOnWhite;
+
+      console.log(
+        "White background analysis:",
+        {
+          strictWhiteRatio:
+            Number(
+              strictWhiteRatio.toFixed(3)
+            ),
+
+          studioBackgroundRatio:
+            Number(
+              studioBackgroundRatio.toFixed(3)
+            ),
+
+          strictWhiteEdgeRatio:
+            Number(
+              strictWhiteEdgeRatio.toFixed(3)
+            ),
+
+          studioEdgeRatio:
+            Number(
+              studioEdgeRatio.toFixed(3)
+            ),
+
+          cleanCorners,
+
+          outsideStudioRatio:
+            Number(
+              outsideStudioRatio.toFixed(3)
+            ),
+
+          detectedObjectOnWhite,
+
+          visuallyIsolatedOnWhite,
+
+          result
+        }
+      );
+
+      return result;
+    }
+
+
+    // ============================================================
+    // 10. ENVIRONMENTAL PHOTO HEURISTIC
+    //
+    // Uses texture spread across an 8x8 spatial grid.
+    //
+    // Environmental photography generally contains texture,
+    // lighting variation and detail across much of the image.
+    // ============================================================
+
+    function analyzeSpatialGridEntropy(
+      img
+    ) {
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      const size =
+        160;
+
+      canvas.width =
+        size;
+
+      canvas.height =
+        size;
+
+      const ctx =
+        canvas.getContext(
+          '2d',
+          {
+            willReadFrequently:
+              true
+          }
+        );
+
+      ctx.drawImage(
+        img,
+        0,
+        0,
+        size,
+        size
+      );
+
+      const data =
+        ctx.getImageData(
+          0,
+          0,
+          size,
+          size
+        ).data;
+
+
+      // ==========================================================
+      // TRANSPARENCY
+      // ==========================================================
+
+      let transparentPixels =
+        0;
+
+      for (
+        let i = 3;
+        i < data.length;
+        i += 4
+      ) {
+        if (
+          data[i] <
+          200
+        ) {
+          transparentPixels++;
+        }
+      }
+
+      if (
+        transparentPixels /
+        (
+          size *
+          size
+        ) >
+        0.05
+      ) {
+        return false;
+      }
+
+
+      // ==========================================================
+      // 8 x 8 GRID
+      // ==========================================================
+
+      const gridSize =
+        8;
+
+      const blockSize =
+        size /
+        gridSize;
+
+      let activeTexturedSectors =
+        0;
+
+      for (
+        let gy = 0;
+        gy < gridSize;
+        gy++
+      ) {
+
+        for (
+          let gx = 0;
+          gx < gridSize;
+          gx++
+        ) {
+
+          let rSum =
+            0;
+
+          let gSum =
+            0;
+
+          let bSum =
+            0;
+
+          const pixelCount =
+            blockSize *
+            blockSize;
+
+
+          // ------------------------------------------------------
+          // Mean RGB
+          // ------------------------------------------------------
+
+          for (
+            let y =
+              gy *
+              blockSize;
+
+            y <
+              (
+                gy + 1
+              ) *
+              blockSize;
+
+            y++
+          ) {
+
+            for (
+              let x =
+                gx *
+                blockSize;
+
+              x <
+                (
+                  gx + 1
+                ) *
+                blockSize;
+
+              x++
+            ) {
+
+              const idx =
+                (
+                  Math.floor(y) *
+                  size +
+                  Math.floor(x)
+                )
+                * 4;
+
+              rSum +=
+                data[idx];
+
+              gSum +=
+                data[idx + 1];
+
+              bSum +=
+                data[idx + 2];
+            }
+          }
+
+          const rMean =
+            rSum /
+            pixelCount;
+
+          const gMean =
+            gSum /
+            pixelCount;
+
+          const bMean =
+            bSum /
+            pixelCount;
+
+
+          // ------------------------------------------------------
+          // VARIANCE
+          // ------------------------------------------------------
+
+          let variance =
+            0;
+
+          for (
+            let y =
+              gy *
+              blockSize;
+
+            y <
+              (
+                gy + 1
+              ) *
+              blockSize;
+
+            y++
+          ) {
+
+            for (
+              let x =
+                gx *
+                blockSize;
+
+              x <
+                (
+                  gx + 1
+                ) *
+                blockSize;
+
+              x++
+            ) {
+
+              const idx =
+                (
+                  Math.floor(y) *
+                  size +
+                  Math.floor(x)
+                )
+                * 4;
+
+              variance +=
+                Math.abs(
+                  data[idx] -
+                  rMean
+                )
+                +
+                Math.abs(
+                  data[idx + 1] -
+                  gMean
+                )
+                +
+                Math.abs(
+                  data[idx + 2] -
+                  bMean
+                );
+            }
+          }
+
+
+          // ------------------------------------------------------
+          // Sector has natural image detail
+          // ------------------------------------------------------
+
+          if (
+            variance /
+            pixelCount >
+            11
+          ) {
+            activeTexturedSectors++;
+          }
+        }
+      }
+
+      const texturedRatio =
+        activeTexturedSectors /
+        64;
+
+      console.log(
+        "Environment texture ratio:",
+        Number(
+          texturedRatio.toFixed(3)
+        )
+      );
+
+      return (
+        texturedRatio >=
+        0.55
+      );
+    }
+
+
+    // ============================================================
+    // 11. IMAGE LOADER
+    // ============================================================
+
+    function loadImage(
+      file
+    ) {
+
+      return new Promise(
+        (
+          resolve,
+          reject
+        ) => {
+
+          const img =
+            new Image();
+
+          const objectURL =
+            URL.createObjectURL(
+              file
+            );
+
+          img.onload =
+            () => {
+
+              URL.revokeObjectURL(
+                objectURL
+              );
+
+              resolve(
+                img
+              );
+            };
+
+          img.onerror =
+            error => {
+
+              URL.revokeObjectURL(
+                objectURL
+              );
+
+              reject(
+                error
+              );
+            };
+
+          img.src =
+            objectURL;
+        }
+      );
+    }
+  </script>
+
+</body>
+</html>
