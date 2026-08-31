@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Galería de fotos</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #fff;
+      color: #111;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .page-title {
+      margin: 0;
+      padding: 36px 24px 28px;
+      text-align: center;
+      font-size: 32px;
+      line-height: 1.2;
+      font-weight: 600;
+    }
+
+    .gallery {
+      width: min(1400px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 28px 16px;
+    }
+
+    .photo-card {
+      min-width: 0;
+    }
+
+    .photo {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      background: #eee;
+    }
+
+    .title {
+    margin: 9px 0 0;
+    font-size: 14px;
+    line-height: 1.3;
+    font-weight: 600;
+    text-align: center;
+    font-family: Gotham, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+
+    @media (max-width: 700px) {
+      .page-title {
+        padding: 24px 12px 20px;
+        font-size: 24px;
+      }
+
+      .gallery {
+        padding: 14px 12px 24px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 22px 8px;
+      }
+
+      .title {
+        margin-top: 7px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h1 class="page-title">CANALES TDT ESPAÑA</h1>
+
+  <main class="gallery">
+    <article class="photo-card"> <a href="https://www.rtve.es/play/videos/directo/canales-lineales/la-1/" target="_blank"><img class="photo" src="images/xla1.jpg"></a>
+      <p class="title">La 1</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.rtve.es/play/videos/directo/canales-lineales/la-2/" target="_blank"><img class="photo" src="images/xla2.jpg"></a>
+      <p class="title">La 2</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.atresplayer.com/directos/antena3/" target="_blank"><img class="photo" src="images/xantena3.jpg"></a>
+      <p class="title">Antena 3</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/cuatro/" target="_blank"><img class="photo" src="images/xcuatro.jpg"></a>
+      <p class="title">Cuatro</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/telecinco/" target="_blank"><img class="photo" src="images/xtele5.jpg"></a>
+      <p class="title">Tele 5</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.atresplayer.com/directos/lasexta/" target="_blank"><img class="photo" src="images/xlasexta.jpg"></a>
+      <p class="title">La Sexta</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://laseptima.pro/" target="_blank"><img class="photo" src="images/xlaseptima.jpg"></a>
+      <p class="title">La Séptima</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.atresplayer.com/directos/atreseries/" target="_blank"><img class="photo" src="images/xa3series.jpg"></a>
+      <p class="title">A3 Series</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/divinity/" target="_blank"><img class="photo" src="images/xdivinity.jpg"></a>
+      <p class="title">Divinity</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/fdf/" target="_blank"><img class="photo" src="images/xfdf.jpg"></a>
+      <p class="title">FDF</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/energy/" target="_blank"><img class="photo" src="images/xenergy.jpg"></a>
+      <p class="title">Energy</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.atresplayer.com/directos/mega/" target="_blank"><img class="photo" src="images/xmega.jpg"></a>
+      <p class="title">Mega</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.atresplayer.com/directos/nova/" target="_blank"><img class="photo" src="images/xnova.jpg"></a>
+      <p class="title">Nova</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/bemad/" target="_blank"><img class="photo" src="images/xbemad.jpg"></a>
+      <p class="title">Be Mad</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.rtve.es/play/videos/directo/canales-lineales/24h/" target="_blank"><img class="photo" src="images/x24horas.jpg"></a>
+      <p class="title">24 Horas</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.rtve.es/play/videos/directo/canales-lineales/clan/" target="_blank"><img class="photo" src="images/xclan.jpg"></a>
+      <p class="title">Clan</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.mediasetinfinity.es/directo/boing/" target="_blank"><img class="photo" src="images/xboing.jpg"></a>
+      <p class="title">Boing</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.atresplayer.com/directos/neox/" target="_blank"><img class="photo" src="images/xneox.jpg"></a>
+      <p class="title">Neox</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.cope.es/directos/trece" target="_blank"><img class="photo" src="images/xtrece.jpg"></a>
+      <p class="title">Trece</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.telemadrid.es/emision-en-directo/" target="_blank"><img class="photo" src="images/xtelemad.jpg"></a>
+      <p class="title">Telemadrid</p>
+    </article>
+
+    <article class="photo-card"> <a href="https://www.telemadrid.es/emision-en-directo-laotra/" target="_blank"><img class="photo" src="images/xlaotra.jpg"></a>
+      <p class="title">La otra</p>
+    </article>
+  </main>
+
+</body>
+</html>
