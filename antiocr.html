@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Anti-OCR Image Tool</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1a1a2e;
+    color: #e4e4e7;
+    margin: 0;
+    padding: 20px;
+    min-height: 100vh;
+  }
+  h1 { color: #a78bfa; margin-bottom: 8px; }
+  .subtitle { color: #71717a; margin-bottom: 24px; font-size: 14px; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  .layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+  .panel {
+    background: #27272a;
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid #3f3f46;
+  }
+  .drop-zone {
+    border: 2px dashed #52525b;
+    border-radius: 8px;
+    padding: 30px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 16px;
+  }
+  .drop-zone:hover, .drop-zone.drag { border-color: #a78bfa; background: #2d2d3a; }
+  .control { margin-bottom: 14px; }
+  label { display: block; font-size: 13px; margin-bottom: 6px; color: #d4d4d8; }
+  input[type="range"] { width: 100%; }
+  .val { color: #a78bfa; font-weight: bold; float: right; }
+  button {
+    width: 100%;
+    padding: 10px;
+    background: #7c3aed;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+  button:hover { background: #6d28d9; }
+  button.secondary { background: #3f3f46; }
+  button.secondary:hover { background: #52525b; }
+  canvas {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    background: #0f0f17;
+    display: block;
+  }
+  .canvas-wrap { text-align: center; }
+  .text-input {
+    width: 100%;
+    padding: 8px;
+    background: #18181b;
+    border: 1px solid #3f3f46;
+    color: #e4e4e7;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #a78bfa;
+    letter-spacing: 1px;
+    margin: 16px 0 8px;
+    border-bottom: 1px solid #3f3f46;
+    padding-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎭 Anti-OCR Image Tool</h1>
+  <p class="subtitle">Aplica técnicas para dificultar la detección de texto por OCR (Rekognition, Textract, Tesseract, etc.)</p>
+
+  <div class="layout">
+    <div class="panel">
+      <div class="drop-zone" id="drop">
+        <div>📁 Arrastra una imagen</div>
+        <div style="font-size:12px;color:#71717a;margin-top:4px">o haz clic para seleccionar</div>
+        <input type="file" id="file" accept="image/*" hidden>
+      </div>
+
+      <div class="section-title">O genera texto</div>
+      <div class="control">
+        <input type="text" class="text-input" id="genText" placeholder="Escribe texto a renderizar" value="Texto Secreto 123">
+        <button class="secondary" id="genBtn">Generar imagen de texto</button>
+      </div>
+
+      <div class="section-title">Distorsión</div>
+      <div class="control">
+        <label>Onda horizontal <span class="val" id="v-wave">0</span></label>
+        <input type="range" id="wave" min="0" max="30" value="0">
+      </div>
+      <div class="control">
+        <label>Frecuencia onda <span class="val" id="v-freq">0.05</span></label>
+        <input type="range" id="freq" min="1" max="30" value="5">
+      </div>
+
+      <div class="section-title">Ruido</div>
+      <div class="control">
+        <label>Ruido sal/pimienta <span class="val" id="v-noise">0</span>%</label>
+        <input type="range" id="noise" min="0" max="50" value="0">
+      </div>
+      <div class="control">
+        <label>Ruido adversarial <span class="val" id="v-adv">0</span></label>
+        <input type="range" id="adv" min="0" max="40" value="0">
+      </div>
+
+      <div class="section-title">Contraste y color</div>
+      <div class="control">
+        <label>Reducir contraste <span class="val" id="v-contrast">0</span>%</label>
+        <input type="range" id="contrast" min="0" max="90" value="0">
+      </div>
+      <div class="control">
+        <label>Desplazar canal azul <span class="val" id="v-blue">0</span></label>
+        <input type="range" id="blue" min="0" max="100" value="0">
+      </div>
+
+      <div class="section-title">Oclusión</div>
+      <div class="control">
+        <label>Líneas cruzadas <span class="val" id="v-lines">0</span></label>
+        <input type="range" id="lines" min="0" max="30" value="0">
+      </div>
+      <div class="control">
+        <label>Manchas aleatorias <span class="val" id="v-blobs">0</span></label>
+        <input type="range" id="blobs" min="0" max="40" value="0">
+      </div>
+
+      <div class="section-title">Geometría</div>
+      <div class="control">
+        <label>Rotación global <span class="val" id="v-rot">0</span>°</label>
+        <input type="range" id="rot" min="-45" max="45" value="0">
+      </div>
+
+      <button id="reset" class="secondary">🔄 Reset</button>
+      <button id="download">⬇️ Descargar PNG</button>
+    </div>
+
+    <div class="panel canvas-wrap">
+      <canvas id="canvas" width="600" height="300"></canvas>
+      <p style="font-size:12px;color:#71717a;margin-top:12px">Vista previa en tiempo real</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let originalImage = null;
+
+// Imagen inicial de ejemplo
+function initDemo() {
+  renderText("Texto Secreto 123");
+}
+
+function renderText(text) {
+  const tmp = document.createElement('canvas');
+  tmp.width = 600; tmp.height = 200;
+  const t = tmp.getContext('2d');
+  t.fillStyle = 'white';
+  t.fillRect(0, 0, tmp.width, tmp.height);
+  t.fillStyle = 'black';
+  t.font = 'bold 60px Georgia';
+  t.textAlign = 'center';
+  t.textBaseline = 'middle';
+  t.fillText(text, tmp.width/2, tmp.height/2);
+  const img = new Image();
+  img.onload = () => { originalImage = img; apply(); };
+  img.src = tmp.toDataURL();
+}
+
+// Carga de archivo
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('drag');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => { originalImage = img; apply(); };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+document.getElementById('genBtn').addEventListener('click', () => {
+  renderText(document.getElementById('genText').value || "Texto");
+});
+
+// Controles
+const controls = ['wave','freq','noise','adv','contrast','blue','lines','blobs','rot'];
+controls.forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    const v = el.value;
+    const label = document.getElementById('v-'+id);
+    if (id === 'freq') label.textContent = (v/100).toFixed(2);
+    else label.textContent = v;
+    apply();
+  });
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  controls.forEach(id => {
+    document.getElementById(id).value = id === 'rot' ? 0 : (id === 'freq' ? 5 : 0);
+  });
+  controls.forEach(id => {
+    const v = document.getElementById(id).value;
+    const label = document.getElementById('v-'+id);
+    if (id === 'freq') label.textContent = (v/100).toFixed(2);
+    else label.textContent = v;
+  });
+  apply();
+});
+
+document.getElementById('download').addEventListener('click', () => {
+  const link = document.createElement('a');
+  link.download = 'anti-ocr.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+function apply() {
+  if (!originalImage) return;
+  const w = originalImage.width, h = originalImage.height;
+  canvas.width = w; canvas.height = h;
+
+  const rot = parseFloat(document.getElementById('rot').value) * Math.PI / 180;
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(w/2, h/2);
+  ctx.rotate(rot);
+  ctx.drawImage(originalImage, -w/2, -h/2);
+  ctx.restore();
+
+  let imgData = ctx.getImageData(0, 0, w, h);
+  let data = imgData.data;
+
+  // Onda horizontal
+  const waveAmp = parseFloat(document.getElementById('wave').value);
+  const waveFreq = parseFloat(document.getElementById('freq').value) / 100;
+  if (waveAmp > 0) {
+    const src = new Uint8ClampedArray(data);
+    for (let y = 0; y < h; y++) {
+      const shift = Math.round(Math.sin(y * waveFreq) * waveAmp);
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(w-1, Math.max(0, x + shift));
+        const di = (y * w + x) * 4;
+        const si = (y * w + sx) * 4;
+        data[di] = src[si];
+        data[di+1] = src[si+1];
+        data[di+2] = src[si+2];
+        data[di+3] = src[si+3];
+      }
+    }
+  }
+
+  // Reducir contraste
+  const contrastReduce = parseFloat(document.getElementById('contrast').value) / 100;
+  if (contrastReduce > 0) {
+    const factor = 1 - contrastReduce;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i]   = 128 + (data[i] - 128) * factor;
+      data[i+1] = 128 + (data[i+1] - 128) * factor;
+      data[i+2] = 128 + (data[i+2] - 128) * factor;
+    }
+  }
+
+  // Desplazar canal azul
+  const blueShift = parseInt(document.getElementById('blue').value);
+  if (blueShift > 0) {
+    for (let i = 0; i < data.length; i += 4) {
+      data[i+2] = Math.min(255, data[i+2] + blueShift);
+    }
+  }
+
+  // Ruido sal y pimienta
+  const noiseP = parseFloat(document.getElementById('noise').value) / 100;
+  if (noiseP > 0) {
+    for (let i = 0; i < data.length; i += 4) {
+      if (Math.random() < noiseP) {
+        const v = Math.random() < 0.5 ? 0 : 255;
+        data[i] = v; data[i+1] = v; data[i+2] = v;
+      }
+    }
+  }
+
+  // Ruido adversarial (perturbación aleatoria sutil por píxel)
+  const advStr = parseFloat(document.getElementById('adv').value);
+  if (advStr > 0) {
+    for (let i = 0; i < data.length; i += 4) {
+      data[i]   = Math.min(255, Math.max(0, data[i]   + (Math.random()-0.5)*advStr*2));
+      data[i+1] = Math.min(255, Math.max(0, data[i+1] + (Math.random()-0.5)*advStr*2));
+      data[i+2] = Math.min(255, Math.max(0, data[i+2] + (Math.random()-0.5)*advStr*2));
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  // Líneas cruzadas
+  const lineCount = parseInt(document.getElementById('lines').value);
+  for (let i = 0; i < lineCount; i++) {
+    ctx.strokeStyle = `rgba(${Math.random()*100},${Math.random()*100},${Math.random()*100},0.6)`;
+    ctx.lineWidth = 1 + Math.random() * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.random()*w, Math.random()*h);
+    ctx.bezierCurveTo(Math.random()*w, Math.random()*h, Math.random()*w, Math.random()*h, Math.random()*w, Math.random()*h);
+    ctx.stroke();
+  }
+
+  // Manchas / blobs
+  const blobCount = parseInt(document.getElementById('blobs').value);
+  for (let i = 0; i < blobCount; i++) {
+    ctx.fillStyle = `rgba(${Math.random()*255},${Math.random()*255},${Math.random()*255},0.4)`;
+    ctx.beginPath();
+    ctx.arc(Math.random()*w, Math.random()*h, 5 + Math.random()*25, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+initDemo();
+</script>
+</body>
+</html>
